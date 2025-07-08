@@ -1,0 +1,37 @@
+mrn0-acc0:
+    radiology_report_nodules:
+        -   location: right inferior gland
+            size: 13mm
+            composition: cystic
+            echogenicity: hypoechoic
+            shape: None
+            margin: smoothe
+            echogenic_foci: None
+        -   location: left upper gland
+            size: 18mm
+            composition: solid
+            echogenicity: isoechoic
+            shape: taller-than-wide
+            margin: irregular
+            echogenic_foci: microcalcifications
+    biopsy_report_nodules:
+        -   location: left
+            size: 18mm
+            composition: None
+            echogenicity: None
+            shape: None
+            margin: None
+            echogenic_foci: None
+            pathology_result: malignant
+            detailed_location: left upper gland
+            detailed_location_confidence: high
+        -   location: right superior
+            size: 14mm
+            composition: None
+            echogenicity: None
+            shape: None
+            margin: None
+            echogenic_foci: None
+            pathology_result: benign
+            detailed_location: right inferior gland
+            detailed_location_confidence: low
