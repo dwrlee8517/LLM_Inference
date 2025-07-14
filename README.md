@@ -1,210 +1,424 @@
-# RadPath LLM Inference
+# LLM Inference System Refactoring Guide
 
-A medical report parsing system that uses Large Language Models to extract structured information from radiology and biopsy reports for thyroid nodule analysis.
+## 🎯 Overview
+
+This document outlines the complete refactoring of the original `llm_batch_inference.py` script into a modular, configurable, and extensible system.
 
 ## 📋 Table of Contents
-- [Setup](#setup)
-- [Quick Start](#quick-start)
-- [Project Structure](#project-structure)
-- [Usage](#usage)
-- [Customization](#customization)
-- [Evaluation](#evaluation)
-- [Troubleshooting](#troubleshooting)
 
-## 🚀 Setup
+- [Problems with Original System](#problems-with-original-system)
+- [Refactored Architecture](#refactored-architecture)
+- [Key Benefits](#key-benefits)
+- [File Structure](#file-structure)
+- [How to Use](#how-to-use)
+- [Extension Guide](#extension-guide)
+- [Migration from Original](#migration-from-original)
+- [Best Practices](#best-practices)
 
-### Prerequisites
-- Python 3.8+
-- CUDA-compatible GPU (recommended)
-- Access to medical report datasets
+## 🚨 Problems with Original System
 
-### Installation
-1. Clone this repository
-2. Install dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-### Configuration
-Before running inference, you'll need to update the following paths in the scripts:
-- **Data folder**: Update `data_folder` in `llm_batch_inference.py` (line 18)
-- **Cache directory**: Update `cache_dir` in `llm_batch_inference.py` (line 32)
-- **Model path**: Ensure model cache directory exists on your system
-
-## ⚡ Quick Start
-
-### Basic Inference
-```bash
-python llm_batch_inference.py
-```
-
-The script will prompt you for:
-- Output filename (default: `inference_results.json`)
-- CUDA device selection
-- Model quantization options
-
-### Alternative Inference (Radiology Only)
-```bash
-python llm_inference_ashwath.py
-```
-
-## 📁 Project Structure
-
-```
-.
-├── llm_batch_inference.py         # Main inference script
-├── llm_inference_ashwath.py       # Radiology-only inference
-├── helpers/
-│   ├── llm_helper.py              # Core helper functions
-│   ├── llm_prompts.py             # 🔥 Prompt templates (MODIFY HERE)
-│   ├── annotation_dataset.py      # Dataset classes
-│   ├── annotation_metrics.py      # Evaluation metrics
-│   └── temp.py                    # Utility functions
-├── data/
-│   ├── mrnacc_ultrasound_generate_radreport.pkl
-│   └── mrnacc_ultrasound_generate_bxreport.pkl
-├── manual_annotations/
-│   ├── dev_corrected.yaml         # Dev set annotations
-│   ├── example_YAML.yaml          # Example output format
-│   └── annotations_template.yaml  # Template for new annotations
-├── parse_llm_results.py           # Parse LLM JSON to YAML
-├── eval.py                        # Evaluation script
-└── llm_results/                   # Output directory
-```
-
-## 🎯 Usage
-
-### 1. Running Inference
-
-#### Main Script: `llm_batch_inference.py`
-- **Purpose**: Process both radiology and biopsy reports
-- **Output**: Structured YAML with nodule details and matching
-- **Features**: Resume capability, multiple MRN sets, GPU monitoring
-
-#### Key Configuration Options:
+### 1. **Hardcoded Configuration**
 ```python
-# Select MRN set (lines 42-90)
-mrns = test_mrns      # Change to: dev_mrns, steven_new50, chandler_new50, etc.
+# Original - Everything hardcoded
+data_folder = '/radraid2/dongwoolee/RadPath/data'
+cache_dir = "/radraid2/dongwoolee/.llms"
+model_name = "unsloth/Llama-3.3-70B-Instruct-bnb-4bit"
+```
 
-# Select prompt template (line 169)
+### 2. **Monolithic Structure**
+- Single 200+ line function
+- All concerns mixed together
+- Hard to test individual components
+
+### 3. **Limited Extensibility**
+- Adding new data sources requires code changes
+- New model types need core modifications
+- Prompt management is scattered
+
+### 4. **Poor Error Handling**
+- No systematic error management
+- Limited logging and monitoring
+- No graceful degradation
+
+## 🏗️ Refactored Architecture
+
+### Component Overview
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    Configuration Layer                      │
+├─────────────────────────────────────────────────────────────┤
+│  config.yaml + ConfigManager + Command Line Interface       │
+└─────────────────────────────────────────────────────────────┘
+                                │
+┌─────────────────────────────────────────────────────────────┐
+│                    Interface Layer                          │
+├─────────────────────────────────────────────────────────────┤
+│  Abstract Base Classes + Factory Pattern                    │
+└─────────────────────────────────────────────────────────────┘
+                                │
+┌─────────────────────────────────────────────────────────────┐
+│                  Implementation Layer                       │
+├─────────────────────────────────────────────────────────────┤
+│  DataLoaders │ ModelManagers │ PromptManagers │ OutputMgrs  │
+└─────────────────────────────────────────────────────────────┘
+                                │
+┌─────────────────────────────────────────────────────────────┐
+│                   Orchestration Layer                       │
+├─────────────────────────────────────────────────────────────┤
+│              LLMInferenceOrchestrator                       │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Key Components
+
+1. **Configuration System** (`core/config.py`)
+   - YAML-based configuration
+   - Command-line overrides
+   - Environment-specific settings
+
+2. **Interface Layer** (`core/interfaces.py`)
+   - Abstract base classes
+   - Factory pattern for component creation
+   - Type safety and contracts
+
+3. **Implementation Layer** (`helpers/`)
+   - Concrete implementations
+   - Plugin-style architecture
+   - Easy to extend and replace
+
+4. **Orchestration** (`refactored_main.py`)
+   - Coordinates all components
+   - Manages workflow
+   - Error handling and cleanup
+
+## ✨ Key Benefits
+
+### 1. **Configuration-Driven**
+```yaml
+# config.yaml
+data:
+  source_type: "pickle"
+  data_folder: "/your/data/path"
+  
+model:
+  model_name: "your-model"
+  cache_dir: "/your/cache/path"
+```
+
+### 2. **Modular Design**
+```python
+# Easy to swap components
+data_loader = ComponentFactory.create_data_loader("csv", config)
+model_manager = ComponentFactory.create_model_manager("huggingface", config)
+```
+
+### 3. **Extensible Architecture**
+```python
+# Add new data loader
+class DatabaseDataLoader(DataLoader):
+    def load_data(self, config):
+        # Custom database loading logic
+        pass
+
+# Register with factory
+ComponentFactory.register_data_loader("database", DatabaseDataLoader)
+```
+
+### 4. **Better Error Handling**
+```python
+# Systematic error management
+try:
+    results = orchestrator.run_inference()
+except DataValidationError as e:
+    logger.error(f"Data validation failed: {e}")
+except ModelLoadingError as e:
+    logger.error(f"Model loading failed: {e}")
+```
+
+## 📁 File Structure
+
+```
+project/
+├── config.yaml                    # Main configuration file
+├── refactored_main.py             # Main entry point
+├── core/
+│   ├── __init__.py
+│   ├── config.py                  # Configuration management
+│   └── interfaces.py              # Abstract base classes
+├── implementations/
+│   ├── __init__.py
+│   ├── data_loaders.py           # Data loading implementations
+│   ├── model_managers.py         # Model management (to be created)
+│   ├── prompt_managers.py        # Prompt management (to be created)
+│   └── output_managers.py        # Output management (to be created)
+├── plugins/                       # Optional plugin directory
+└── tests/                         # Unit tests
+```
+
+## 🚀 How to Use
+
+### Basic Usage
+
+```bash
+# Use default configuration
+python refactored_main.py
+
+# Use custom configuration file
+python refactored_main.py --config my_config.yaml
+
+# Override specific settings
+python refactored_main.py --data-folder /path/to/data --model-name custom-model
+
+# Show configuration without running
+python refactored_main.py --dry-run
+```
+
+### Advanced Usage
+
+```bash
+# Process specific custom IDs
+python refactored_main.py --custom-ids "ID1" "ID2" "ID3" --output-file custom_results.json
+
+# Process IDs from file
+python refactored_main.py --id-file ids.txt --output-file file_results.json
+
+# Process all available IDs
+python refactored_main.py --process-all --output-file all_results.json
+
+# Custom quantization and devices
+python refactored_main.py --quantization 8 --cuda-devices "0,1,2,3"
+
+# Different output format
+python refactored_main.py --format yaml --results-dir /custom/output/path
+```
+
+## 🔧 Extension Guide
+
+### Adding a New Data Loader
+
+1. **Create the Implementation**
+```python
+# implementations/data_loaders.py
+class DatabaseDataLoader(DataLoader):
+    def __init__(self, config: DataConfig):
+        self.config = config
+        self.connection = None
+    
+    def load_data(self, config: Dict[str, Any]) -> Dict[str, Any]:
+        # Connect to database
+        self.connection = create_database_connection(config)
+        
+        # Load data
+        radreports = self.connection.execute("SELECT * FROM radreports")
+        bxreports = self.connection.execute("SELECT * FROM bxreports")
+        
+        return {
+            'radiology_reports': dict(radreports),
+            'biopsy_reports': dict(bxreports)
+        }
+    
+    def validate_data(self, data: Dict[str, Any]) -> bool:
+        # Custom validation logic
+        return True
+```
+
+2. **Register with Factory**
+```python
+# At the end of implementations/data_loaders.py
+ComponentFactory.register_data_loader("database", DatabaseDataLoader)
+```
+
+3. **Update Configuration**
+```yaml
+# config.yaml
+data:
+  source_type: "database"
+  connection_string: "postgresql://user:pass@localhost/db"
+```
+
+### Adding a New Model Manager
+
+1. **Create the Implementation**
+```python
+# implementations/model_managers.py
+class HuggingFaceModelManager(ModelManager):
+    def load_model(self, config: Dict[str, Any]) -> Tuple[Any, Any]:
+        # Load HuggingFace model
+        tokenizer = AutoTokenizer.from_pretrained(config['model_name'])
+        model = AutoModelForCausalLM.from_pretrained(config['model_name'])
+        return tokenizer, model
+    
+    def generate(self, tokenizer, model, messages, generation_config):
+        # Custom generation logic
+        pass
+```
+
+2. **Register and Configure**
+```python
+ComponentFactory.register_model_manager("huggingface", HuggingFaceModelManager)
+```
+
+### Adding a New Prompt Template
+
+1. **Create the Template**
+```python
+# helpers/llm_prompts.py
+def prompt_chat_template_custom(bxreports, radreports):
+    # Your custom prompt logic
+    pass
+```
+
+2. **Update Configuration**
+```yaml
+inference:
+  prompt_template: "prompt_chat_template_custom"
+```
+
+### Adding Custom Output Formats
+
+1. **Create Output Manager**
+```python
+# implementations/output_managers.py
+class CSVOutputManager(OutputManager):
+    def save_results(self, results, output_config):
+        # Save to CSV format
+        pass
+```
+
+2. **Register and Configure**
+```python
+ComponentFactory.register_output_manager("csv", CSVOutputManager)
+```
+
+## 🔄 Migration from Original
+
+### Step 1: Update Configuration
+
+```python
+# Original
+data_folder = '/radraid2/dongwoolee/RadPath/data'
+cache_dir = "/radraid2/dongwoolee/.llms"
+model_name = "unsloth/Llama-3.3-70B-Instruct-bnb-4bit"
+
+# New - config.yaml
+data:
+  data_folder: "/radraid2/dongwoolee/RadPath/data"
+model:
+  cache_dir: "/radraid2/dongwoolee/.llms"
+  model_name: "unsloth/Llama-3.3-70B-Instruct-bnb-4bit"
+```
+
+### Step 2: Update ID Selection
+
+```python
+# Original
+dev_mrns = [...]
+test_mrns = [...]
+mrns = dev_mrns  # Hardcoded selection
+
+# New - config.yaml
+data:
+  # ID selection options:
+  process_all: true              # Process all available IDs
+  custom_ids: [...]              # List of specific IDs to process
+  id_file: "ids.txt"             # File containing IDs to process
+```
+
+### Step 3: Update Prompt Selection
+
+```python
+# Original
 batch_messages = prompt_chat_template_Qwen1(bxreports_batch, radreports_batch)
+
+# New - config.yaml
+inference:
+  prompt_template: "prompt_chat_template_Qwen1"
 ```
 
-### 2. Processing Results
+### Step 4: Run Migration Script
+
 ```bash
-# Parse LLM JSON output to YAML
-python parse_llm_results.py --filename your_output.json
-
-# Evaluate results
-python eval.py --manual dev_corrected.yaml --llm parsed_your_output.yaml
+# Create migration script
+python migrate_from_original.py --original-config original_settings.py --output config.yaml
 ```
 
-### 3. Available MRN Sets
-- `dev_mrns`: Development set (90 samples)
-- `test_mrns`: Test set (300+ samples)
-- `steven_new50`: Steven's annotation set (50 samples)
-- `chandler_new50`: Chandler's annotation set (50 samples)
-- `bx_loc_error_mrns`: Error cases for biopsy location
+## 💡 Best Practices
 
-## 🛠️ Customization
+### 1. **Configuration Management**
+- Use environment-specific config files
+- Never hardcode paths or credentials
+- Use environment variables for sensitive data
 
-### Modifying Prompts
-The main file to modify is `helpers/llm_prompts.py`. Available prompt templates:
+### 2. **Component Development**
+- Follow the interface contracts
+- Add comprehensive logging
+- Include proper error handling
+- Write unit tests
 
-- `prompt_chat_template_2`: Basic extraction
-- `prompt_chat_template_Qwen1`: Current production prompt
-- `prompt_chat_template_6`: Alternative approach
-- `prompt_chat_template_ashwath`: Radiology-only
-
-### Adding New Prompts
-1. Create a new function in `helpers/llm_prompts.py`
-2. Follow the existing format with system and user messages
-3. Update the prompt call in `llm_batch_inference.py`
-
-### Example Prompt Structure:
+### 3. **Testing**
 ```python
-def prompt_chat_template_new(bxreports, radreports):
-    prompts = []
-    for bxreport, radreport in zip(bxreports, radreports):
-        messages = [
-            {"role": "system", "content": "Your system prompt here..."},
-            {"role": "user", "content": f"Biopsy_Report: {bxreport}, Radiology_Report: {radreport}"}
-        ]
-        prompts.append(messages)
-    return prompts
+# Unit test example
+def test_pickle_data_loader():
+    config = DataConfig(source_type="pickle", ...)
+    loader = PickleDataLoader(config)
+    
+    data = loader.load_data(config)
+    assert loader.validate_data(data)
 ```
 
-### Modifying Dataset
-- Update data paths in scripts
-- Ensure pickle files contain `{mrn: report_text}` format
-- Add new MRN lists as needed
+### 4. **Deployment**
+- Use configuration files for different environments
+- Implement health checks
+- Add monitoring and alerting
+- Use containerization for consistency
 
-## 📊 Evaluation
+### 5. **Performance**
+- Profile different components
+- Implement caching where appropriate
+- Use async processing for I/O operations
+- Monitor resource usage
 
-### Manual Evaluation
-```bash
-python eval.py --manual manual_annotations/dev_corrected.yaml --llm llm_results/parsed_your_output.yaml
-```
+## 🆚 Comparison: Original vs Refactored
 
-### Output Metrics
-- **Information Extraction**: Accuracy for each field (location, size, etc.)
-- **Nodule Matching**: Precision, Recall, F1 for matching radiology to biopsy nodules
-- **Confusion Matrix**: Detailed performance breakdown
+| Aspect | Original | Refactored |
+|--------|----------|------------|
+| **Configuration** | Hardcoded | YAML + CLI |
+| **Extensibility** | Monolithic | Plugin-based |
+| **Testing** | Difficult | Unit testable |
+| **Deployment** | Manual setup | Config-driven |
+| **Error Handling** | Basic | Comprehensive |
+| **Logging** | Minimal | Structured |
+| **Customization** | Code changes | Configuration |
+| **Maintenance** | High effort | Low effort |
 
-### Annotation Format
-See `manual_annotations/example_YAML.yaml` for the expected YAML structure.
+## 🎯 Next Steps
 
-## 🐛 Troubleshooting
+1. **Complete Implementation**
+   - Implement remaining managers (Model, Prompt, Output)
+   - Add monitoring and caching systems
+   - Create comprehensive tests
 
-### Common Issues
+2. **Advanced Features**
+   - Add plugin system for custom components
+   - Implement distributed processing
+   - Add real-time monitoring dashboard
 
-1. **CUDA Out of Memory**
-   - Reduce batch size or use higher quantization (4-bit)
-   - Set `CUDA_VISIBLE_DEVICES` to use specific GPUs
+3. **Documentation**
+   - Create API documentation
+   - Add usage examples
+   - Write deployment guides
 
-2. **Model Loading Errors**
-   - Verify cache directory exists and has sufficient space
-   - Check internet connection for model downloads
+4. **Community**
+   - Create contribution guidelines
+   - Set up CI/CD pipeline
+   - Add issue templates
 
-3. **Data File Not Found**
-   - Update data paths in scripts
-   - Ensure pickle files are in the correct directory
+## 📚 Resources
 
-4. **YAML Parsing Errors**
-   - Check LLM output format
-   - Verify `ruamel.yaml` is installed correctly
+- [Configuration Management Best Practices](https://12factor.net/config)
+- [Factory Pattern in Python](https://refactoring.guru/design-patterns/factory-method/python/example)
+- [Abstract Base Classes](https://docs.python.org/3/library/abc.html)
+- [Logging Best Practices](https://docs.python.org/3/howto/logging.html)
 
-### Performance Tips
-- Use quantization for faster inference
-- Monitor GPU usage with `gpustat`
-- Resume interrupted runs using existing JSON files
-
-## 📝 File Descriptions
-
-### Core Scripts
-- **`llm_batch_inference.py`**: Main inference script with full functionality
-- **`llm_inference_ashwath.py`**: Simplified radiology-only inference
-- **`parse_llm_results.py`**: Convert JSON outputs to structured YAML
-- **`eval.py`**: Comprehensive evaluation against manual annotations
-
-### Helper Modules
-- **`helpers/llm_prompts.py`**: All prompt templates (primary customization point)
-- **`helpers/llm_helper.py`**: Model loading, GPU monitoring, output parsing
-- **`helpers/annotation_dataset.py`**: Dataset classes and data loading
-- **`helpers/annotation_metrics.py`**: Evaluation metrics and scoring
-
-### Data Files
-- **`thygraph_exp41_radreports.pkl`**: Radiology reports dataset
-- **`data/mrnacc_ultrasound_generate_*.pkl`**: Paired radiology/biopsy reports
-- **`manual_annotations/`**: Ground truth annotations for evaluation
-
-## 🤝 Contributing
-
-1. Test your changes with a small MRN set first
-2. Update documentation if adding new features
-3. Follow the existing code style and structure
-4. Validate outputs against manual annotations
-
-## 📄 License
-
-[Add your license information here]
+This refactoring transforms your specific medical report processing system into a general-purpose, extensible LLM inference framework that can be easily adapted for different domains and use cases. 

@@ -1,0 +1,107 @@
+# Configuration file for LLM Batch Inference
+# This replaces hardcoded values and makes the system configurable
+
+# Data Configuration
+data:
+  # Data source configuration
+  source_type: "pickle"  # Options: "pickle", "json", "csv", "database"
+  data_folder: "/radraid2/dongwoolee/LLM_Inference/data"
+  
+  # Input files configuration
+  input_files:
+    - name: "radiology_reports"
+      path: "mrnacc_ultrasound_generate_radreport.pkl"
+      required: true
+    - name: "biopsy_reports"
+      path: "mrnacc_ultrasound_generate_bxreport.pkl"
+      required: true
+  
+  # Data processing
+  # ID selection options (choose one):
+  process_all: true              # Process all available IDs
+  custom_ids: []                 # List of specific IDs to process (overrides process_all)
+  id_file: null                  # Path to file containing IDs to process (overrides above)
+  
+  # Resume functionality
+  resume_from_existing: true
+  check_processed: true
+
+# Model Configuration
+model:
+  cache_dir: "/radraid2/dongwoolee/.llms"
+  model_name: "unsloth/Llama-3.3-70B-Instruct-bnb-4bit"
+  
+  # Quantization settings
+  quantization:
+    enabled: false
+    bits: 4  # Options: 4, 8, null (no quantization)
+  
+  # Device settings
+  cuda_devices: "0,1"
+
+  # Adjust the max memory for each GPU if you don't have enough memory for inference
+  # For example, if you have 48GB of memory, and your model is 46GB, you might not have enough memory for inference. 
+  # Then you need to reduce the max memory for each GPU so that the model can be loaded to two GPUs
+  max_memory:
+    "0": "32GB"
+    "1": "32GB"
+
+# Inference Configuration
+inference:
+  # Prompt configuration
+  prompt_template: "prompt_chat_template_Qwen1"
+  
+  # Generation parameters
+  generation:
+    do_sample: false # Options: true, false --> false is greedy, and true allows for sampling
+    temperature: null
+    top_p: null
+    top_k: null
+    max_tokens: 32768 # adjust this value based on your desired output length and the model's context window
+  
+  # Batch processing
+  # Most models do not support batch processing, so we set it to 1
+  batch_size: 1
+  shuffle: false
+
+# Output Configuration
+output:
+  # Output directory and file naming
+  results_dir: "llm_results"
+  default_filename: "inference_results.json"
+  
+  # Output format
+  format: "json"  # Options: "json", "yaml", "csv"
+  
+  # Additional outputs
+  save_elapsed_time: true
+  save_intermediate_results: true
+  
+  # Backup and versioning
+  backup_existing: true
+  add_timestamp: false
+
+# Logging Configuration
+logging:
+  level: "INFO"  # Options: "DEBUG", "INFO", "WARNING", "ERROR"
+  file: "inference.log"
+  console: true
+  
+  # Progress tracking
+  progress_bar: true
+  gpu_monitoring: true
+
+# System Configuration
+system:
+  # Performance settings
+  num_workers: 1 # adjust this value based on your desired number of workers
+  pin_memory: true
+  
+  # Error handling
+  continue_on_error: true # Options: true, false --> true means that the script will continue running even if there is an error
+  max_retries: 3 
+  retry_delay: 5  # seconds
+  
+  # Resource monitoring
+  memory_threshold: 0.9  # Stop if memory usage exceeds 90%
+  gpu_memory_threshold: 0.95

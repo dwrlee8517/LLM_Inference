@@ -208,3 +208,7 @@ __marimo__/
 
 # Data
 data/
+
+# Old files
+llm_batch_inference.py
+parse_llm_results.py
