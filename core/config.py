@@ -10,6 +10,8 @@ from typing import Dict, Any, Optional, List
 from dataclasses import dataclass
 from pathlib import Path
 import logging
+import sys
+import logging.handlers
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +41,7 @@ class ModelConfig:
     model_name: str
     quantization: QuantizationConfig
     cuda_devices: str
-    max_memory: Dict[str, str]
+    max_memory: Optional[Dict[str, str]]
 
 @dataclass
 class GenerationConfig:
@@ -58,6 +60,7 @@ class InferenceConfig:
     generation: GenerationConfig
     batch_size: int
     shuffle: bool
+    multimodal: bool
 
 @dataclass
 class OutputConfig:
@@ -96,7 +99,17 @@ class ConfigManager:
     """Manages configuration loading and validation."""
     
     def __init__(self, config_path: Optional[str] = None):
-        self.config_path = config_path or "config.yaml"
+
+        if not config_path.startswith("configs/"):
+            # If the configuration yaml file is not in the configs/ directory, ask the user if they want to use the default configuration file directory
+            user_input = input("Is the configuration yaml file in the configs/ directory? (y/n): ")
+            if user_input.lower() in ["y", "yes"]:
+                self.config_path = f"configs/{config_path}"
+            else:
+                self.config_path = config_path
+        else:
+            self.config_path = config_path
+
         self.config = self._load_config()
         self._validate_config()
     
@@ -155,7 +168,7 @@ class ConfigManager:
                 bits=quantization_conf.get('bits', None)
             ),
             cuda_devices=model_conf['cuda_devices'],
-            max_memory=model_conf['max_memory']
+            max_memory=model_conf.get('max_memory')
         )
     
     def get_inference_config(self) -> InferenceConfig:
@@ -172,7 +185,8 @@ class ConfigManager:
                 max_tokens=generation_conf['max_tokens']
             ),
             batch_size=inference_conf['batch_size'],
-            shuffle=inference_conf['shuffle']
+            shuffle=inference_conf['shuffle'],
+            multimodal=inference_conf['multimodal']
         )
     
     def get_output_config(self) -> OutputConfig:
@@ -388,6 +402,12 @@ def create_argument_parser() -> argparse.ArgumentParser:
         '--dry-run',
         action='store_true',
         help='Show configuration and exit without running inference'
+    )
+    
+    parser.add_argument(
+        '--list-models',
+        action='store_true',
+        help='List all supported models and exit'
     )
     
     return parser

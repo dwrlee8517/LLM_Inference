@@ -6,11 +6,15 @@ These interfaces allow for easy extension and customization of components.
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional, Iterator, Tuple
 from dataclasses import dataclass
+import sys
+import os
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from core.config import GenerationConfig, DataConfig, ModelConfig, OutputConfig, InferenceConfig # Import the new dataclasses
 import logging
 
 logger = logging.getLogger(__name__)
-
 
 @dataclass
 class InferenceRequest:
@@ -18,7 +22,6 @@ class InferenceRequest:
     id: str
     data: Dict[str, Any]
     metadata: Optional[Dict[str, Any]] = None
-
 
 @dataclass
 class InferenceResult:
@@ -93,7 +96,7 @@ class PromptManager(ABC):
     @abstractmethod
     def create_messages(self, 
                        template_name: str, 
-                       data: Dict[str, Any]) -> List[Dict[str, str]]:
+                       data: Any) -> List[Dict[str, str]]:
         """Create messages for the model using the specified template."""
         pass
     
@@ -352,6 +355,10 @@ class ComponentFactory:
     _output_managers: Dict[str, type] = {}
     _inference_engines: Dict[str, type] = {}
     
+    # Model registry mapping model names to model managers
+    _model_registry: Dict[str, str] = {}  # model_name -> manager_name
+    _model_patterns: Dict[str, List[str]] = {}  # manager_name -> list of model name patterns
+    
     @classmethod
     def register_data_loader(cls, name: str, loader_class: type) -> None:
         """Register a data loader class."""
@@ -361,6 +368,66 @@ class ComponentFactory:
     def register_model_manager(cls, name: str, manager_class: type) -> None:
         """Register a model manager class."""
         cls._model_managers[name] = manager_class
+    
+    @classmethod
+    def register_model_manager_for_patterns(cls, name: str, manager_class: type, patterns: List[str]) -> None:
+        """Register a model manager class with supported model name patterns."""
+        cls._model_managers[name] = manager_class
+        cls._model_patterns[name] = patterns
+        
+        # Also register exact matches in the registry
+        for pattern in patterns:
+            cls._model_registry[pattern] = name
+    
+    @classmethod
+    def register_model_for_manager(cls, model_name: str, manager_name: str) -> None:
+        """Register a specific model name to use a specific manager."""
+        if manager_name not in cls._model_managers:
+            raise ValueError(f"Unknown model manager: {manager_name}")
+        cls._model_registry[model_name] = manager_name
+    
+    @classmethod
+    def get_model_manager_for_model(cls, model_name: str) -> str:
+        """Get the appropriate model manager name for a given model name."""
+        # First check exact matches
+        if model_name in cls._model_registry:
+            return cls._model_registry[model_name]
+        
+        # Then check patterns
+        for manager_name, patterns in cls._model_patterns.items():
+            for pattern in patterns:
+                if model_name.startswith(pattern):
+                    return manager_name
+        
+        # If no specific manager found, raise an error
+        raise ValueError(f"No model manager found for model: {model_name}. "
+                        f"Supported models: {list(cls._model_registry.keys())} "
+                        f"and patterns: {cls._model_patterns}")
+    
+    @classmethod
+    def validate_model_support(cls, model_name: str) -> bool:
+        """Validate that a model name is supported by the registered managers."""
+        try:
+            cls.get_model_manager_for_model(model_name)
+            return True
+        except ValueError:
+            return False
+    
+    @classmethod
+    def list_supported_models(cls) -> Dict[str, List[str]]:
+        """List all supported models grouped by manager."""
+        supported = {}
+        for manager_name, patterns in cls._model_patterns.items():
+            supported[manager_name] = patterns
+        
+        # Add exact matches
+        for model_name, manager_name in cls._model_registry.items():
+            if manager_name not in supported:
+                supported[manager_name] = []
+            if model_name not in supported[manager_name]:
+                supported[manager_name].append(model_name)
+        
+        return supported
     
     @classmethod
     def register_prompt_manager(cls, name: str, manager_class: type) -> None:
@@ -392,6 +459,24 @@ class ComponentFactory:
         return cls._model_managers[name](config)
     
     @classmethod
+    def create_model_manager_for_model(cls, config: ModelConfig) -> ModelManager:
+        """Create a model manager instance based on the model name in config."""
+        model_name = config.model_name
+        
+        # Validate that the model is supported
+        if not cls.validate_model_support(model_name):
+            supported_models = cls.list_supported_models()
+            raise ValueError(f"Model '{model_name}' is not supported. "
+                           f"Supported models: {supported_models}")
+        
+        # Get the appropriate manager name
+        manager_name = cls.get_model_manager_for_model(model_name)
+        
+        # Create and return the manager
+        logger.info(f"Creating model manager '{manager_name}' for model '{model_name}'")
+        return cls._model_managers[manager_name](config)
+    
+    @classmethod
     def create_prompt_manager(cls, name: str, config: InferenceConfig) -> PromptManager:
         """Create a prompt manager instance."""
         if name not in cls._prompt_managers:
@@ -406,8 +491,8 @@ class ComponentFactory:
         return cls._output_managers[name](config)
     
     @classmethod
-    def create_inference_engine(cls, name: str, config: InferenceConfig) -> InferenceEngine:
+    def create_inference_engine(cls, name: str, config: InferenceConfig, model_manager: ModelManager, prompt_manager: PromptManager) -> InferenceEngine:
         """Create an inference engine instance."""
         if name not in cls._inference_engines:
             raise ValueError(f"Unknown inference engine: {name}")
-        return cls._inference_engines[name](config)
+        return cls._inference_engines[name](config, model_manager, prompt_manager)

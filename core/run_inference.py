@@ -6,11 +6,11 @@ from typing import Dict, Any, List, Optional
 from pathlib import Path
 
 # Add the current directory to the path so we can import our modules
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir)))
 
 from core.config import ConfigManager, create_argument_parser, setup_logging
 from core.interfaces import ComponentFactory
-from implementations.data_loaders import *  # This registers the data loaders
+from implementations.dataloaders import *  # This registers the data loaders
 from implementations.model_managers import *
 from implementations.prompt_managers import *
 from implementations.output_managers import *
@@ -41,9 +41,31 @@ class LLMInferenceOrchestrator:
         
         logger.info("LLM Inference Orchestrator initialized")
     
+    def validate_model_configuration(self) -> None:
+        """Validate that the model configuration is supported."""
+        model_name = self.model_config.model_name
+        
+        # Check if the model is supported
+        if not ComponentFactory.validate_model_support(model_name):
+            supported_models = ComponentFactory.list_supported_models()
+            
+            logger.error(f"Model '{model_name}' is not supported.")
+            logger.error(f"Supported models by manager:")
+            for manager_name, patterns in supported_models.items():
+                logger.error(f"  {manager_name}: {patterns}")
+            
+            raise ValueError(f"Model '{model_name}' is not supported. "
+                           f"Supported models: {supported_models}")
+        
+        # Log which manager will be used
+        manager_name = ComponentFactory.get_model_manager_for_model(model_name)
+        logger.info(f"Model '{model_name}' will use manager: {manager_name}")
+    
     def initialize_components(self) -> None:
         """Initialize all system components."""
         try:
+            # Validate model configuration first
+            self.validate_model_configuration()
             # Initialize data loader
             self.data_loader = ComponentFactory.create_data_loader(
                 self.data_config.source_type,
@@ -51,16 +73,15 @@ class LLMInferenceOrchestrator:
             )
             logger.info(f"Data loader initialized: {self.data_config.source_type}")
             
-            # Initialize model manager
-            self.model_manager = ComponentFactory.create_model_manager(
-                "transformers",
+            # Initialize model manager based on model name
+            self.model_manager = ComponentFactory.create_model_manager_for_model(
                 self.model_config
             )
-            logger.info("Model manager initialized.")
+            logger.info(f"Model manager initialized for model: {self.model_config.model_name}")
             
             # Initialize prompt manager
             self.prompt_manager = ComponentFactory.create_prompt_manager(
-                "default",
+                "RadPath",
                 self.inference_config
             )
             logger.info("Prompt manager initialized.")
@@ -214,10 +235,26 @@ def show_configuration(config_manager: ConfigManager) -> None:
     
     print("\nMODEL CONFIGURATION:")
     model_config = config['model']
-    print(f"  Model Name: {model_config['model_name']}")
+    model_name = model_config['model_name']
+    print(f"  Model Name: {model_name}")
     print(f"  Cache Dir: {model_config['cache_dir']}")
     print(f"  CUDA Devices: {model_config['cuda_devices']}")
     print(f"  Quantization: {model_config['quantization']['bits']} bits")
+    
+    # Show which model manager will be used
+    try:
+        manager_name = ComponentFactory.get_model_manager_for_model(model_name)
+        print(f"  Model Manager: {manager_name}")
+    except ValueError as e:
+        print(f"  Model Manager: ERROR - {e}")
+        print("  Available model managers:")
+        supported_models = ComponentFactory.list_supported_models()
+        for manager_name, patterns in supported_models.items():
+            print(f"    {manager_name}: {patterns}")
+    
+    # Show if model is supported
+    is_supported = ComponentFactory.validate_model_support(model_name)
+    print(f"  Model Supported: {'Yes' if is_supported else 'No'}")
     
     print("\nINFERENCE CONFIGURATION:")
     inference_config = config['inference']
@@ -240,6 +277,32 @@ def show_configuration(config_manager: ConfigManager) -> None:
     print("\n" + "="*60)
 
 
+def list_supported_models() -> None:
+    """List all supported models grouped by manager."""
+    print("\n" + "="*60)
+    print("SUPPORTED MODELS BY MANAGER")
+    print("="*60)
+    
+    supported_models = ComponentFactory.list_supported_models()
+    
+    if not supported_models:
+        print("No model managers registered.")
+        return
+    
+    for manager_name, patterns in supported_models.items():
+        print(f"\n{manager_name.upper()} MANAGER:")
+        if patterns:
+            print("  Supported patterns:")
+            for pattern in patterns:
+                print(f"    - {pattern}")
+        else:
+            print("  No patterns registered")
+    
+    print("\nTo use a model, specify its name in the configuration file or use --model-name.")
+    print("Example: --model-name unsloth/Llama-3.3-70B-Instruct-bnb-4bit")
+    print("\n" + "="*60)
+
+
 def main():
     """Main entry point for the refactored inference system."""
     try:
@@ -259,10 +322,15 @@ def main():
         
         logger.info("Starting refactored LLM inference system")
         
+        # List supported models if requested
+        if args.list_models:
+            list_supported_models()
+            return
+        
         # Show configuration if requested
         if args.dry_run:
             show_configuration(config_manager)
-            print("\n🌟 DRY RUN MODE - Configuration shown above")
+            print("\nDRY RUN MODE - Configuration shown above")
             print("To run actual inference, remove the --dry-run flag")
             return
         

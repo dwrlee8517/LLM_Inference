@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 class DefaultInferenceEngine(InferenceEngine):
     """
-    Default inference engine that processes data in batches.
+    Default inference engine with 
     """
 
     def __init__(self, config: InferenceConfig, model_manager: ModelManager, prompt_manager: PromptManager):

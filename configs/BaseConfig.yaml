@@ -18,8 +18,8 @@ data:
   
   # Data processing
   # ID selection options (choose one):
-  process_all: true              # Process all available IDs
-  custom_ids: []                 # List of specific IDs to process (overrides process_all)
+  process_all: false              # Process all available IDs
+  custom_ids: ['mrn0-acc0']                 # List of specific IDs to process (overrides process_all)
   id_file: null                  # Path to file containing IDs to process (overrides above)
   
   # Resume functionality
@@ -29,7 +29,7 @@ data:
 # Model Configuration
 model:
   cache_dir: "/radraid2/dongwoolee/.llms"
-  model_name: "unsloth/Llama-3.3-70B-Instruct-bnb-4bit"
+  model_name: "unsloth/QwQ-32B-unsloth-bnb-4bit"
   
   # Quantization settings
   quantization:
@@ -63,6 +63,9 @@ inference:
   # Most models do not support batch processing, so we set it to 1
   batch_size: 1
   shuffle: false
+
+  # Multimodal models require the prompts to be in the multimodal format
+  multimodal: false
 
 # Output Configuration
 output:

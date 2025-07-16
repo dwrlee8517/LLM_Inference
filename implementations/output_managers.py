@@ -27,6 +27,8 @@ class JSONOutputManager(OutputManager):
         results_dir.mkdir(parents=True, exist_ok=True)
         
         base_filename = filename or self.config.default_filename
+
+        # Add timestamp to the filename if specified
         if self.config.add_timestamp:
             timestamp = time.strftime("%Y%m%d-%H%M%S")
             stem = Path(base_filename).stem
@@ -39,9 +41,11 @@ class JSONOutputManager(OutputManager):
         """Save results to a JSON file."""
         output_path = self.get_output_path(filename)
         
+        # Backup the existing file if specified
         if output_path.exists() and self.config.backup_existing:
             self.backup_existing_file(output_path)
 
+        # Save the results to the file
         try:
             with open(output_path, "w") as f:
                 json.dump(results, f, indent=4)
@@ -54,9 +58,12 @@ class JSONOutputManager(OutputManager):
     def load_existing_results(self, filename: str = None) -> Dict[str, Any]:
         """Load existing results from a JSON file."""
         output_path = self.get_output_path(filename)
+
+        # If the file does not exist, return an empty dictionary
         if not output_path.exists():
             return {}
         
+        # Load the results from the file
         try:
             with open(output_path, "r") as f:
                 results = json.load(f)
@@ -67,9 +74,15 @@ class JSONOutputManager(OutputManager):
             return {}
 
     def backup_existing_file(self, file_path: Path) -> str:
-        """Create a timestamped backup of an existing file."""
+        """Create a timestamped backup of an existing file.
+        This is used to save the existing file with a timestamped backup.
+        This is useful to avoid losing the existing file if the inference fails.
+        It is also useful to avoid overwriting the existing file if the inference is successful.
+        """
         timestamp = time.strftime("%Y%m%d-%H%M%S")
         backup_path = file_path.with_name(f"{file_path.stem}_backup_{timestamp}{file_path.suffix}")
+
+        # Create a timestamped backup of the existing file
         try:
             file_path.rename(backup_path)
             logger.info(f"Backed up existing file to {backup_path}")
@@ -83,4 +96,4 @@ class JSONOutputManager(OutputManager):
         return set(results.keys())
 
 # Register the output manager with the factory
-ComponentFactory.register_output_manager("json", JSONOutputManager) 
+ComponentFactory.register_output_manager("json", JSONOutputManager)
