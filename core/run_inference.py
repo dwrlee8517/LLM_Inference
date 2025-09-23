@@ -40,7 +40,7 @@ class LLMInferenceOrchestrator:
         self.output_config = config_manager.get_output_config()
         self.system_config = config_manager.get_system_config()
         
-        logger.info("LLM Inference Orchestrator initialized")
+        logger.debug("LLM Inference Orchestrator initialized")
     
     def validate_model_configuration(self) -> None:
         """Validate that the model configuration is supported."""
@@ -60,7 +60,7 @@ class LLMInferenceOrchestrator:
         
         # Log which manager will be used
         manager_name = ComponentFactory.get_model_manager_for_model(model_name)
-        logger.info(f"Model '{model_name}' will use manager: {manager_name}")
+        logger.debug(f"Model '{model_name}' will use manager: {manager_name}")
     
     def setup_components(self):
         """Initialize and set up all components."""
@@ -69,26 +69,26 @@ class LLMInferenceOrchestrator:
             self.validate_model_configuration()
             # Initialize data reader
             self.data_reader = ComponentFactory.create_data_reader(self.data_config)
-            logger.info(f"Data reader initialized: {self.data_config.source_type}")
+            logger.debug(f"Data reader initialized: {self.data_config.source_type}")
             
             # Initialize model manager based on model name
             self.model_manager = ComponentFactory.create_model_manager_for_model(
                 self.model_config
             )
-            logger.info(f"Model manager initialized for model: {self.model_config.model_name}")
+            logger.debug(f"Model manager initialized for model: {self.model_config.model_name}")
             
             # Initialize preprocessor
             self.preprocessor = ComponentFactory.create_preprocessor(
                 self.inference_config
             )
-            logger.info("Preprocessor initialized.")
+            logger.debug(f"Preprocessor initialized: {self.preprocessor.__class__.__name__}")
             
             # Initialize output manager
             self.output_manager = ComponentFactory.create_output_manager(
                 self.output_config.format,
                 self.output_config
             )
-            logger.info("Output manager initialized.")
+            logger.debug(f"Output manager initialized: {self.output_manager.__class__.__name__}")
             
             # Initialize inference engine
             self.inference_engine = ComponentFactory.create_inference_engine(
@@ -97,7 +97,7 @@ class LLMInferenceOrchestrator:
                 self.model_manager,
                 self.preprocessor
             )
-            logger.info("Inference engine initialized.")
+            logger.debug(f"Inference engine initialized: {self.inference_engine.__class__.__name__}")
             
             logger.info("All components initialized successfully")
             
@@ -152,7 +152,7 @@ class LLMInferenceOrchestrator:
         """Run the full inference pipeline."""
         try:
             # Step 1: Loading and creating dataset
-            logger.info("Step 1: Loading and creating dataset...")
+            logger.info("1. Loading and creating dataset...")
             dataset, all_ids = self.data_reader.load_data()
             
             # Step 2: Handle resume logic
@@ -170,11 +170,20 @@ class LLMInferenceOrchestrator:
                 unprocessed_dataset = dataset
             
             # Step 4: Run inference
-            logger.info("Step 4: Running inference...")
+            logger.info("2. Running inference...")
+            # If output manager supports incremental append (JSONL), provide a hook
+            if hasattr(self.output_manager, 'append_result'):
+                def _append_result(_id, text):
+                    try:
+                        self.output_manager.append_result(_id, text, self.output_config.default_filename)
+                    except Exception as e:
+                        logger.warning(f"Failed to append result for {_id}: {e}")
+                setattr(self.inference_engine, '_append_result', _append_result)
+
             new_results = self.inference_engine.process_dataset(unprocessed_dataset)
             
             # Step 5: Save results
-            logger.info("Step 5: Saving results...")
+            logger.info("3. Saving results...")
 
             # If resuming, load existing results and merge them
             if self.data_config.resume_from_existing:
@@ -195,7 +204,7 @@ class LLMInferenceOrchestrator:
             logger.info("Inference pipeline completed successfully.")
             print("\nInference completed successfully!")
             print(f"   Processed {len(new_results)} IDs")
-            print(f"   Results saved to output directory")
+            print(f"   Results saved to output directory\n")
 
         except Exception as e:
             logger.error(f"Inference pipeline failed: {e}", exc_info=True)
@@ -367,6 +376,23 @@ def main():
     except KeyboardInterrupt:
         logger.info("Inference interrupted by user")
         print("\nInference interrupted by user")
+        try:
+            if 'orchestrator' in locals() and hasattr(orchestrator, 'output_manager'):
+                existing = orchestrator.output_manager.load_existing_results(
+                    orchestrator.output_config.default_filename
+                )
+                processed_ids = list(existing.keys())
+                # Derive output dir from manager path helper
+                out_path = orchestrator.output_manager.get_output_path(orchestrator.output_config.default_filename)
+                out_dir = Path(out_path).parent
+                ids_path = out_dir / "processed_ids.txt"
+                with open(ids_path, "w", encoding="utf-8") as f:
+                    for pid in processed_ids:
+                        f.write(f"\n".join(processed_ids))
+                        break
+                logger.info(f"Wrote processed IDs to {ids_path}")
+        except Exception:
+            pass
         sys.exit(1)
         
     except Exception as e:

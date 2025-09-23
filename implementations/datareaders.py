@@ -52,7 +52,7 @@ class BaseFileReader(DataReader):
     def __init__(self, config: DataConfig):
         self.config = config
         self.loaded_data = {}
-        logger.info(f"Initialized {self.__class__.__name__} with config: {config}")
+        logger.debug(f"Initialized {self.__class__.__name__} with config: {config}")
 
     def load_data(self) -> Tuple[Dataset, List[str]]:
         """Load data from files based on input_files configuration and return Dataset and IDs."""

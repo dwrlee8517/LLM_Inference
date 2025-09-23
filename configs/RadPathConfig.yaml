@@ -37,7 +37,7 @@ model:
     bits: 4  # Options: 4, 8, null (no quantization)
   
   # Device settings
-  cuda_devices: "7"
+  cuda_devices: "3,4"
   # max_memory:
   #   "0": "40GB"
   #   "1": "40GB"
@@ -68,10 +68,10 @@ inference:
 output:
   # Output directory and file naming
   results_dir: "llm_results"
-  default_filename: "inference_results.json"
+  default_filename: "inference_results.jsonl"
   
   # Output format
-  format: "json"  # Options: "json", "yaml", "csv"
+  format: "jsonl"  # Options: "json", "jsonl"
   
   # Additional outputs
   save_elapsed_time: true

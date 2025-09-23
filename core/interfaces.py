@@ -484,7 +484,7 @@ class ComponentFactory:
         manager_name = cls.get_model_manager_for_model(model_name)
         
         # Create and return the manager
-        logger.info(f"Creating model manager '{manager_name}' for model '{model_name}'")
+        logger.debug(f"Creating model manager '{manager_name}' for model '{model_name}'")
         return cls._model_managers[manager_name](config)
     
     @classmethod

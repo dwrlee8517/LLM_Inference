@@ -51,7 +51,7 @@ class RadPathPreprocessor(Preprocessor):
         self.system_text = data.get("system", self.system_text)
         self.user_template = data.get("user_template", self.user_template)
 
-        logger.info(f"Loaded prompt template from {prompt_path}")
+        logger.debug(f"Loaded prompt template from {prompt_path}")
 
     def prepare_inputs(self, batch: Any) -> Tuple[List[str], List[Any]]:
         # Accept dict samples or legacy tuples; normalize to dict
@@ -138,7 +138,7 @@ class RadReportPreprocessor(Preprocessor):
         self.system_text = data.get("system", self.system_text)
         self.user_template = data.get("user_template", self.user_template)
 
-        logger.info(f"Loaded prompt template from {prompt_path}")
+        logger.debug(f"Loaded prompt template from {prompt_path}")
 
     def prepare_inputs(self, batch: Any) -> Tuple[List[str], List[Any]]:
         # Normalize batch to a dict sample

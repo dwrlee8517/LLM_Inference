@@ -27,7 +27,7 @@ class BaseHuggingFaceManager(ModelManager):
         self.config = config
         self.model = None
         self.tokenizer = None
-        logger.info(f"Initialized {self.__class__.__name__}")
+        logger.debug(f"Initialized {self.__class__.__name__}")
 
     def load_model(self) -> Tuple[Any, Any]:
         """Load tokenizer and model."""
@@ -205,7 +205,7 @@ class BaseHuggingFaceManager(ModelManager):
         self.model = None
         self.tokenizer = None
         torch.cuda.empty_cache()
-        logger.info("Model resources cleaned up.")
+        logger.debug("Model resources cleaned up.")
 
 class Llama3ModelManager(BaseHuggingFaceManager):
     """Model manager specifically for Meta's Llama models."""
@@ -214,6 +214,18 @@ class Llama3ModelManager(BaseHuggingFaceManager):
         "unsloth/Llama-3",
     ]
 
+    def _generate_from_specific_chat_template(self, inputs: torch.Tensor, generation_config: GenerationConfig) -> List[str]:
+        """Generate from the specific chat template for the model."""
+        outputs = self.model.generate(
+            **inputs,
+            max_new_tokens=generation_config.max_new_tokens,
+            do_sample=generation_config.do_sample,
+            temperature=generation_config.temperature,
+            top_p=generation_config.top_p,
+            top_k=generation_config.top_k,
+            pad_token_id=self.tokenizer.eos_token_id,
+        )
+        return outputs
     def _post_process_output(self, decoded_text: str) -> str:
         """Llama-specific post-processing logic."""
         return decoded_text.split("assistant")[-1].strip().strip("`").strip('json')

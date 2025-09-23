@@ -19,7 +19,7 @@ class JSONOutputManager(OutputManager):
 
     def __init__(self, config: OutputConfig):
         self.config = config
-        logger.info("Initialized JSONOutputManager")
+        logger.debug("Initialized JSONOutputManager")
 
     def get_output_path(self, filename: str = None) -> Path:
         """Construct the full output path for a file."""
@@ -97,3 +97,98 @@ class JSONOutputManager(OutputManager):
 
 # Register the output manager with the factory
 ComponentFactory.register_output_manager("json", JSONOutputManager)
+
+
+class JSONLOutputManager(OutputManager):
+    """Append-friendly JSONL output manager.
+
+    Writes one JSON object per line: {"id": <id>, "result": <text>}.
+    Also supports reading existing IDs to enable resume.
+    """
+
+    def __init__(self, config: OutputConfig):
+        self.config = config
+        logger.debug("Initialized JSONLOutputManager")
+
+    def _get_jsonl_path(self, filename: str = None) -> Path:
+        results_dir = PROJECT_ROOT / self.config.results_dir
+        results_dir.mkdir(parents=True, exist_ok=True)
+        base_filename = filename or self.config.default_filename
+        # Force .jsonl extension
+        stem = Path(base_filename).stem
+        return results_dir / f"{stem}.jsonl"
+
+    def save_results(self, results: Dict[str, Any], filename: str = None) -> str:
+        """Write all results to JSONL (overwrites by default to consolidate)."""
+        output_path = self._get_jsonl_path(filename)
+        # Backup existing file if configured (will delete backup after successful write)
+        backup_path_str = None
+        if output_path.exists() and self.config.backup_existing:
+            backup_path_str = self.backup_existing_file(output_path)
+
+        try:
+            with open(output_path, "w", encoding="utf-8") as f:
+                for _id, text in results.items():
+                    f.write(json.dumps({"id": _id, "result": text}, ensure_ascii=False) + "\n")
+            logger.info(f"Results saved successfully to {output_path}")
+            # Remove backup after successful write, if requested earlier
+            if backup_path_str:
+                try:
+                    Path(backup_path_str).unlink(missing_ok=True)
+                except Exception as e:
+                    logger.debug(f"Failed to delete backup {backup_path_str}: {e}")
+            return str(output_path)
+        except Exception as e:
+            logger.error(f"Failed to save results to {output_path}: {e}")
+            raise
+
+    def append_result(self, _id: str, text: Any, filename: str = None) -> None:
+        """Append a single result line safely."""
+        output_path = self._get_jsonl_path(filename)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(output_path, "a", encoding="utf-8") as f:
+            f.write(json.dumps({"id": _id, "result": text}, ensure_ascii=False) + "\n")
+
+    def load_existing_results(self, filename: str = None) -> Dict[str, Any]:
+        """Return dict of id->result from JSONL (may be large; primarily used for resume IDs)."""
+        output_path = self._get_jsonl_path(filename)
+        if not output_path.exists():
+            return {}
+        results: Dict[str, Any] = {}
+        try:
+            with open(output_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        obj = json.loads(line)
+                        _id = obj.get("id")
+                        if _id is not None and _id not in results:
+                            results[_id] = obj.get("result")
+                    except json.JSONDecodeError:
+                        continue
+            logger.info(f"Loaded {len(results)} existing results from {output_path}")
+            return results
+        except Exception as e:
+            logger.warning(f"Could not parse existing results file {output_path}: {e}")
+            return {}
+
+    def backup_existing_file(self, file_path: Path) -> str:
+        timestamp = time.strftime("%Y%m%d-%H%M%S")
+        backup_path = file_path.with_name(f"{file_path.stem}_backup_{timestamp}{file_path.suffix}")
+        try:
+            file_path.rename(backup_path)
+            logger.info(f"Backed up existing file to {backup_path}")
+            return str(backup_path)
+        except OSError as e:
+            logger.error(f"Failed to back up existing file: {e}")
+            return ""
+
+    def get_processed_ids(self, results: Dict[str, Any]) -> Set[str]:
+        # When resuming, caller should pass loaded results; otherwise, we can parse JSONL quickly
+        return set(results.keys())
+
+
+# Register the JSONL manager
+ComponentFactory.register_output_manager("jsonl", JSONLOutputManager)

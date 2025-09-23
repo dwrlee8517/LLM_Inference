@@ -23,7 +23,7 @@ class DefaultInferenceEngine(InferenceEngine):
         self.tokenizer = None
         self.model = None
         self.stats = {"batches_processed": 0, "total_time": 0}
-        logger.info("Initialized DefaultInferenceEngine")
+        logger.debug("Initialized DefaultInferenceEngine")
 
     def setup(self):
         """Load the model and tokenizer."""
@@ -40,15 +40,21 @@ class DefaultInferenceEngine(InferenceEngine):
         results = {}
         start_time = time.time()
 
+        append_fn = getattr(self, "_append_result", None)
+
         for batch in dataloader:
             mrns_batch, raw_items = self.preprocessor.prepare_inputs(batch)
 
-            # Generate text directly from raw items; model_manager handles message conversion
             generated_texts = self.model_manager.generate(raw_items, self.config.generation)
-            
-            for mrn, gen_text in zip(mrns_batch, generated_texts):
+
+            n = min(len(mrns_batch), len(generated_texts))
+            for i in range(n):
+                mrn = mrns_batch[i]
+                gen_text = generated_texts[i]
                 results[mrn] = gen_text
-            
+                if append_fn:
+                    append_fn(mrn, gen_text)
+
             self.stats["batches_processed"] += 1
 
         end_time = time.time()

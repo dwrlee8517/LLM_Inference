@@ -449,6 +449,20 @@ def setup_logging(config: LoggingConfig):
         # This initial log message will now go to both handlers
         logging.info(f"File logging enabled. Logging to: {log_path} at level {logging.getLevelName(file_level)}")
 
+    # Suppress noisy third-party loggers across console and file outputs
+    for noisy_name in (
+        "urllib3",
+        "urllib3.connectionpool",
+        "accelerate",
+        "accelerate.utils",
+        "accelerate.utils.modeling",
+    ):
+        noisy_logger = logging.getLogger(noisy_name)
+        # Only show errors from these libraries
+        noisy_logger.setLevel(logging.ERROR)
+        # Prevent propagation to root handlers
+        noisy_logger.propagate = False
+
 def find_project_root(marker=".git") -> Path:
     """Find the project root by searching upwards for a marker file/directory."""
     current_dir = Path(__file__).resolve().parent
