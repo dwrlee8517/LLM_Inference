@@ -3,6 +3,7 @@ import argparse
 from transformers import AutoTokenizer, AutoModelForCausalLM
 import sys
 import logging
+import time
 
 def download_model(model_name, save_directory, cuda_devices=None):
     """
@@ -28,8 +29,10 @@ def download_model(model_name, save_directory, cuda_devices=None):
 
         # Download and save model
         print("Downloading model...")
+        start_time = time.time()
         model = AutoModelForCausalLM.from_pretrained(model_name, cache_dir=save_directory)
-        print("Model downloaded and saved successfully.")
+        end_time = time.time()
+        print(f"Model downloaded and saved successfully in {end_time - start_time} seconds.")
 
     except Exception as e:
         print(f"An error occurred: {e}")
@@ -58,7 +61,6 @@ if __name__ == "__main__":
     )
 
     args = parser.parse_args()
-
 
     logging.basicConfig(level=logging.INFO)
     logger = logging.getLogger(__name__)

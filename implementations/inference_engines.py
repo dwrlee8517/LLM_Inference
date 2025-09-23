@@ -6,7 +6,7 @@ import logging
 from typing import List, Dict, Any
 from torch.utils.data import DataLoader
 
-from core.interfaces import InferenceEngine, ComponentFactory, ModelManager, PromptManager
+from core.interfaces import InferenceEngine, ComponentFactory, ModelManager, Preprocessor
 from core.config import InferenceConfig
 
 logger = logging.getLogger(__name__)
@@ -16,10 +16,10 @@ class DefaultInferenceEngine(InferenceEngine):
     Default inference engine with 
     """
 
-    def __init__(self, config: InferenceConfig, model_manager: ModelManager, prompt_manager: PromptManager):
+    def __init__(self, config: InferenceConfig, model_manager: ModelManager, preprocessor: Preprocessor):
         self.config = config
         self.model_manager = model_manager
-        self.prompt_manager = prompt_manager
+        self.preprocessor = preprocessor
         self.tokenizer = None
         self.model = None
         self.stats = {"batches_processed": 0, "total_time": 0}
@@ -27,32 +27,24 @@ class DefaultInferenceEngine(InferenceEngine):
 
     def setup(self):
         """Load the model and tokenizer."""
-        self.tokenizer, self.model = self.model_manager.load_model()
+        self.model, self.tokenizer = self.model_manager.load_model()
 
     def process_dataset(self, dataset: Any) -> Dict[str, Any]:
         """Process an entire dataset."""
         if not self.model or not self.tokenizer:
             self.setup()
 
-        dataloader = DataLoader(dataset, batch_size=self.config.batch_size, shuffle=self.config.shuffle)
+        # Single-sample iteration (no batching)
+        dataloader = DataLoader(dataset, batch_size=1, shuffle=False)
         
         results = {}
         start_time = time.time()
 
         for batch in dataloader:
-            mrns_batch = batch[0]
-            
-            # Create prompts
-            messages = self.prompt_manager.create_messages(
-                self.config.prompt_template,
-                batch
-            )
+            mrns_batch, raw_items = self.preprocessor.prepare_inputs(batch)
 
-            # Generate text
-            generated_texts = self.model_manager.generate(
-                messages,
-                self.config.generation
-            )
+            # Generate text directly from raw items; model_manager handles message conversion
+            generated_texts = self.model_manager.generate(raw_items, self.config.generation)
             
             for mrn, gen_text in zip(mrns_batch, generated_texts):
                 results[mrn] = gen_text
@@ -63,6 +55,8 @@ class DefaultInferenceEngine(InferenceEngine):
         self.stats["total_time"] += (end_time - start_time)
         
         return results
+
+    # Input preparation moved to Preprocessor implementation
 
     def get_stats(self) -> Dict[str, Any]:
         """Get performance statistics."""
@@ -78,4 +72,4 @@ class DefaultInferenceEngine(InferenceEngine):
         raise NotImplementedError("process_single is not implemented in this engine.")
 
 # Register the inference engine with the factory
-ComponentFactory.register_inference_engine("default", DefaultInferenceEngine) 
+ComponentFactory.register_inference_engine("default", DefaultInferenceEngine)

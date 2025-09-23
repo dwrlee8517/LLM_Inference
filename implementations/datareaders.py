@@ -7,11 +7,12 @@ import pickle
 import json
 import pandas as pd
 from pathlib import Path
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 import logging
 from abc import abstractmethod
+from torch.utils.data import Dataset
 
-from core.interfaces import DataLoader, ComponentFactory
+from core.interfaces import DataReader, ComponentFactory
 from core.config import DataConfig
 
 # Keep the import for PairedReportDataset as it's used by multiple loaders
@@ -45,16 +46,16 @@ def get_ids_to_process(config: DataConfig, all_available_ids: List[str]) -> List
     logger.info(f"No ID selection specified, processing all {len(all_available_ids)} available IDs")
     return all_available_ids
 
-class BaseFileDataLoader(DataLoader):
-    """Abstract base class for data loaders that load data from files."""
+class BaseFileReader(DataReader):
+    """Abstract base class for data readers that load data from files."""
 
     def __init__(self, config: DataConfig):
         self.config = config
         self.loaded_data = {}
         logger.info(f"Initialized {self.__class__.__name__} with config: {config}")
 
-    def load_data(self) -> Dict[str, Any]:
-        """Load data from files based on input_files configuration."""
+    def load_data(self) -> Tuple[Dataset, List[str]]:
+        """Load data from files based on input_files configuration and return Dataset and IDs."""
         data = {}
 
         for file_config in self.config.input_files:
@@ -79,14 +80,17 @@ class BaseFileDataLoader(DataLoader):
                     raise
 
         self.loaded_data = data
-        return data
+        # Call get_all_ids here, which internally calls get_ids_to_process once.
+        all_ids = self.get_all_ids()
+        dataset = self._create_dataset()
+        return dataset, all_ids
 
     @abstractmethod
     def _read_file(self, file_path: str, file_config: Dict[str, Any]) -> Dict[str, Any]:
         """Abstract method to read and parse a specific file type."""
         pass
 
-    def get_mrn_list(self) -> List[str]:
+    def get_all_ids(self) -> List[str]:
         """Get list of MRNs based on configuration from loaded data."""
         if not self.loaded_data:
             logger.warning("No data loaded, cannot get MRN list")
@@ -106,82 +110,50 @@ class BaseFileDataLoader(DataLoader):
         # Use the helper function to determine which IDs to process
         return get_ids_to_process(self.config, all_available_mrns)
 
-class BasePairedReportDataLoader(BaseFileDataLoader):
-    """Base class for data loaders that handle paired radiology and biopsy reports."""
+    @abstractmethod
+    def _create_dataset(self) -> Dataset:
+        """Abstract method to create a PyTorch Dataset from loaded data."""
+        pass
 
-    def create_dataset(self, data: Dict[str, Any], mrns: List[str]) -> PairedReportDataset:
-        """Create a dataset object from loaded data for paired reports."""
-        radreports = data.get('radiology_reports', {})
-        bxreports = data.get('biopsy_reports', {})
+class BasePairedReportReader(BaseFileReader):
+    """Base class for data readers that handle paired radiology and biopsy reports."""
+    pass
 
-        # Filter MRNs to only include those present in both datasets
-        valid_mrns = []
-        for mrn in mrns:
-            if mrn in radreports and mrn in bxreports:
-                valid_mrns.append(mrn)
-            else:
-                logger.warning(f"MRN {mrn} not found in both datasets")
+class PairedReportDataReader(BasePairedReportReader):
+    """Unified data reader for paired reports across pickle/json/csv.
 
-        logger.info(f"Created dataset with {len(valid_mrns)} valid MRNs")
-        return PairedReportDataset(radreports, bxreports, valid_mrns)
-
-    def validate_data(self, data: Dict[str, Any]) -> bool:
-        """Validate the loaded data structure for paired reports."""
-        required_keys = ['radiology_reports', 'biopsy_reports']
-
-        for key in required_keys:
-            if key not in data:
-                logger.error(f"Missing required data key: {key}")
-                return False
-
-            if not isinstance(data[key], dict):
-                logger.error(f"Data key {key} must be a dictionary")
-                return False
-
-        # Check for overlapping MRNs
-        rad_mrns = set(data['radiology_reports'].keys())
-        bx_mrns = set(data['biopsy_reports'].keys())
-
-        overlap = rad_mrns & bx_mrns
-        if not overlap:
-            logger.error("No overlapping MRNs found between radiology and biopsy reports")
-            return False
-
-        logger.info(f"Data validation passed. {len(overlap)} overlapping MRNs found")
-        return True
-
-class PickleDataLoader(BasePairedReportDataLoader):
-    """Data loader for pickle files."""
+    Expects two input files configured (radiology_reports, biopsy_reports) of matching ids.
+    """
 
     def _read_file(self, file_path: str, file_config: Dict[str, Any]) -> Dict[str, Any]:
-        """Read and parse a pickle file."""
-        with open(file_path, 'rb') as f:
-            return pickle.load(f)
+        if file_path.endswith('.pkl'):
+            with open(file_path, 'rb') as f:
+                return pickle.load(f)
+        elif file_path.endswith('.json'):
+            with open(file_path, 'r') as f:
+                return json.load(f)
+        elif file_path.endswith('.csv'):
+            df = pd.read_csv(file_path)
+            mrn_col = file_config.get('mrn_column', 'mrn')
+            text_col = file_config.get('text_column', 'text')
+            if mrn_col not in df.columns or text_col not in df.columns:
+                raise ValueError(f"Required columns not found in {file_path}")
+            return dict(zip(df[mrn_col], df[text_col]))
+        else:
+            raise ValueError(f"Unsupported file type: {file_path}")
 
-class JSONDataLoader(BasePairedReportDataLoader):
-    """Data loader for JSON files."""
+    def _create_dataset(self) -> PairedReportDataset:
+        """Create a dataset object from loaded data."""
+        radreports = self.loaded_data.get('radiology_reports', {})
+        bxreports = self.loaded_data.get('biopsy_reports', {})
+        
+        # Get the list of MRNs to process from the configuration
+        all_ids = self.get_all_ids()
+        
+        return PairedReportDataset(radreports, bxreports, all_ids)
 
-    def _read_file(self, file_path: str, file_config: Dict[str, Any]) -> Dict[str, Any]:
-        """Read and parse a JSON file."""
-        with open(file_path, 'r') as f:
-            return json.load(f)
-
-class CSVDataLoader(BasePairedReportDataLoader):
-    """Data loader for CSV files."""
-
-    def _read_file(self, file_path: str, file_config: Dict[str, Any]) -> Dict[str, Any]:
-        """Read and parse a CSV file."""
-        df = pd.read_csv(file_path)
-        mrn_col = file_config.get('mrn_column', 'mrn')
-        text_col = file_config.get('text_column', 'text')
-
-        if mrn_col not in df.columns or text_col not in df.columns:
-            raise ValueError(f"Required columns not found in {file_path}")
-
-        return dict(zip(df[mrn_col], df[text_col]))
-
-class SingleReportDataLoader(BaseFileDataLoader):
-    """Data loader for single report data."""
+class SingleReportDataReader(BaseFileReader):
+    """Data reader for single report data."""
 
     def _read_file(self, file_path: str, file_config: Dict[str, Any]) -> Dict[str, Any]:
         """Read and parse a single report file based on type."""
@@ -199,11 +171,11 @@ class SingleReportDataLoader(BaseFileDataLoader):
         else:
             raise ValueError(f"Unsupported file type for single report: {file_path}")
 
-    def create_dataset(self, data: Dict[str, Any], mrns: List[str]) -> SingleReportDataset:
+    def _create_dataset(self) -> SingleReportDataset:
         """Create a dataset object from loaded data for single reports."""
         # Use the first available data source
         reports = None
-        for data_source in data.values():
+        for data_source in self.loaded_data.values():
             if isinstance(data_source, dict):
                 reports = data_source
                 break
@@ -211,32 +183,10 @@ class SingleReportDataLoader(BaseFileDataLoader):
         if reports is None:
             raise ValueError("No valid data source found for single report dataset")
 
-        valid_mrns = []
-        for mrn in mrns:
-            if mrn in reports:
-                valid_mrns.append(mrn)
-            else:
-                logger.warning(f"MRN {mrn} not found in dataset")
+        all_ids = self.get_all_ids()
+        
+        return SingleReportDataset(reports, all_ids)
 
-        logger.info(f"Created dataset with {len(valid_mrns)} valid MRNs")
-        return SingleReportDataset(reports, valid_mrns)
-
-    def validate_data(self, data: Dict[str, Any]) -> bool:
-        """Validate the loaded data structure for single reports."""
-        if not data:
-            logger.error("No data loaded")
-            return False
-
-        for key, value in data.items():
-            if not isinstance(value, dict):
-                logger.error(f"Data key {key} must be a dictionary")
-                return False
-
-        logger.info("Data validation passed")
-        return True
-
-# Register data loaders with the factory
-ComponentFactory.register_data_loader("pickle", PickleDataLoader)
-ComponentFactory.register_data_loader("json", JSONDataLoader)
-ComponentFactory.register_data_loader("csv", CSVDataLoader)
-ComponentFactory.register_data_loader("single_report", SingleReportDataLoader) 
+# Register data readers with the factory
+ComponentFactory.register_data_reader("paired_report", PairedReportDataReader)
+ComponentFactory.register_data_reader("single_report", SingleReportDataReader)

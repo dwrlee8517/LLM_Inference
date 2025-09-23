@@ -4,15 +4,16 @@ import argparse
 import logging
 from typing import Dict, Any, List, Optional
 from pathlib import Path
+import time
 
 # Add the current directory to the path so we can import our modules
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir)))
 
 from core.config import ConfigManager, create_argument_parser, setup_logging
 from core.interfaces import ComponentFactory
-from implementations.dataloaders import *  # This registers the data loaders
+from implementations.datareaders import *  # This registers the data loaders
 from implementations.model_managers import *
-from implementations.prompt_managers import *
+from implementations.preprocessors import *
 from implementations.output_managers import *
 from implementations.inference_engines import *
 
@@ -26,9 +27,9 @@ class LLMInferenceOrchestrator:
     
     def __init__(self, config_manager: ConfigManager):
         self.config_manager = config_manager
-        self.data_loader = None
+        self.data_reader = None
         self.model_manager = None
-        self.prompt_manager = None
+        self.preprocessor = None
         self.output_manager = None
         self.inference_engine = None
         
@@ -61,17 +62,14 @@ class LLMInferenceOrchestrator:
         manager_name = ComponentFactory.get_model_manager_for_model(model_name)
         logger.info(f"Model '{model_name}' will use manager: {manager_name}")
     
-    def initialize_components(self) -> None:
-        """Initialize all system components."""
+    def setup_components(self):
+        """Initialize and set up all components."""
         try:
             # Validate model configuration first
             self.validate_model_configuration()
-            # Initialize data loader
-            self.data_loader = ComponentFactory.create_data_loader(
-                self.data_config.source_type,
-                self.data_config
-            )
-            logger.info(f"Data loader initialized: {self.data_config.source_type}")
+            # Initialize data reader
+            self.data_reader = ComponentFactory.create_data_reader(self.data_config)
+            logger.info(f"Data reader initialized: {self.data_config.source_type}")
             
             # Initialize model manager based on model name
             self.model_manager = ComponentFactory.create_model_manager_for_model(
@@ -79,12 +77,11 @@ class LLMInferenceOrchestrator:
             )
             logger.info(f"Model manager initialized for model: {self.model_config.model_name}")
             
-            # Initialize prompt manager
-            self.prompt_manager = ComponentFactory.create_prompt_manager(
-                "RadPath",
+            # Initialize preprocessor
+            self.preprocessor = ComponentFactory.create_preprocessor(
                 self.inference_config
             )
-            logger.info("Prompt manager initialized.")
+            logger.info("Preprocessor initialized.")
             
             # Initialize output manager
             self.output_manager = ComponentFactory.create_output_manager(
@@ -98,7 +95,7 @@ class LLMInferenceOrchestrator:
                 "default",
                 self.inference_config,
                 self.model_manager,
-                self.prompt_manager
+                self.preprocessor
             )
             logger.info("Inference engine initialized.")
             
@@ -112,10 +109,10 @@ class LLMInferenceOrchestrator:
         """Load and validate data from configured sources."""
         try:
             # Load data
-            data = self.data_loader.load_data(self.data_config)
+            data = self.data_reader.load_data(self.data_config)
             
             # Validate data
-            if not self.data_loader.validate_data(data):
+            if not self.data_reader.validate_data(data):
                 raise ValueError("Data validation failed")
             
             logger.info("Data loaded and validated successfully")
@@ -128,7 +125,7 @@ class LLMInferenceOrchestrator:
     def get_mrn_list(self) -> List[str]:
         """Get the list of MRNs to process."""
         try:
-            mrns = self.data_loader.get_mrn_list()
+            mrns = self.data_reader.get_mrn_list()
             
             if not mrns:
                 raise ValueError("No MRNs found based on configuration")
@@ -143,7 +140,7 @@ class LLMInferenceOrchestrator:
     def create_dataset(self, data: Dict[str, Any], mrns: List[str]) -> Any:
         """Create a dataset from the loaded data."""
         try:
-            dataset = self.data_loader.create_dataset(data, mrns)
+            dataset = self.data_reader.create_dataset(data, mrns)
             logger.info(f"Dataset created with {len(dataset)} entries")
             return dataset
             
@@ -151,57 +148,80 @@ class LLMInferenceOrchestrator:
             logger.error(f"Failed to create dataset: {e}")
             raise
     
-    def run_inference(self, 
-                     output_filename: Optional[str] = None,
-                     resume: bool = True) -> Dict[str, Any]:
-        """
-        Run the complete inference workflow.
-        """
+    def run_inference(self):
+        """Run the full inference pipeline."""
         try:
-            # Step 1: Load and validate data
-            logger.info("Step 1: Loading and validating data...")
-            data = self.data_loader.load_data()
-            if not self.data_loader.validate_data(data):
-                raise ValueError("Data validation failed")
+            # Step 1: Loading and creating dataset
+            logger.info("Step 1: Loading and creating dataset...")
+            dataset, all_ids = self.data_reader.load_data()
             
-            # Step 2: Get all potential MRNs
-            all_mrns = self.data_loader.get_mrn_list()
+            # Step 2: Handle resume logic
+            unprocessed_ids = self._get_unprocessed_ids(all_ids)
             
-            # Step 3: Handle resume logic
-            results = {}
-            if resume and self.data_config.resume_from_existing:
-                logger.info("Step 3: Loading existing results for resume...")
-                results = self.output_manager.load_existing_results(output_filename)
-            
-            processed_mrns = self.output_manager.get_processed_ids(results)
-            unprocessed_mrns = [mrn for mrn in all_mrns if mrn not in processed_mrns]
-            
-            if not unprocessed_mrns:
-                logger.info("All MRNs already processed. Nothing to do.")
-                return results
-            
-            logger.info(f"Found {len(unprocessed_mrns)} MRNs to process.")
+            if not unprocessed_ids:
+                logger.info("No new IDs to process. Exiting.")
+                return
 
-            # Step 4: Create dataset for unprocessed MRNs
-            logger.info("Step 4: Creating dataset...")
-            dataset = self.data_loader.create_dataset(data, unprocessed_mrns)
+            # Step 3: Create a new dataset with only the unprocessed IDs
+            if hasattr(dataset, 'filter_ids'):
+                unprocessed_dataset = dataset.filter_ids(unprocessed_ids)
+            else:
+                logger.warning("Dataset does not have a 'filter_ids' method. Processing all loaded data as is.")
+                unprocessed_dataset = dataset
             
-            # Step 5: Run inference
-            logger.info("Step 5: Running inference...")
-            new_results = self.inference_engine.process_dataset(dataset)
-            results.update(new_results)
+            # Step 4: Run inference
+            logger.info("Step 4: Running inference...")
+            new_results = self.inference_engine.process_dataset(unprocessed_dataset)
             
-            # Step 6: Save results
-            logger.info("Step 6: Saving results...")
-            output_file_path = self.output_manager.save_results(results, output_filename)
-            logger.info(f"Results saved to: {output_file_path}")
+            # Step 5: Save results
+            logger.info("Step 5: Saving results...")
+
+            # If resuming, load existing results and merge them
+            if self.data_config.resume_from_existing:
+                existing_results = self.output_manager.load_existing_results(
+                    self.output_config.default_filename
+                )
+                existing_results.update(new_results)
+                results_to_save = existing_results
+            else:
+                results_to_save = new_results
             
+            output_path = self.output_manager.save_results(
+                results_to_save, 
+                self.output_config.default_filename
+            )
+            logger.info(f"Results saved to: {output_path}")
+
             logger.info("Inference pipeline completed successfully.")
-            return results
-            
+            print("\nInference completed successfully!")
+            print(f"   Processed {len(new_results)} IDs")
+            print(f"   Results saved to output directory")
+
         except Exception as e:
             logger.error(f"Inference pipeline failed: {e}", exc_info=True)
-            raise
+            print(f"\nFatal error: {e}")
+
+            
+    def _get_unprocessed_ids(self, all_ids: List[str]) -> List[str]:
+        """Get the list of IDs that have not yet been processed."""
+        if not self.data_config.resume_from_existing:
+            logger.info("Resume is disabled by config. Processing all specified IDs.")
+            return all_ids
+
+        logger.info("Resume is enabled. Checking for existing results...")
+        existing_results = self.output_manager.load_existing_results(
+            self.output_config.default_filename
+        )
+
+        if not existing_results:
+            logger.info(f"No existing results found. Processing selected IDs: {len(all_ids)}.")
+            return all_ids
+        
+        processed_ids = set(existing_results.keys())
+        unprocessed_ids = [id for id in all_ids if id not in processed_ids]
+        
+        logger.info(f"Found {len(unprocessed_ids)} new IDs to process.")
+        return unprocessed_ids
     
     def cleanup(self) -> None:
         """Clean up resources."""
@@ -258,9 +278,11 @@ def show_configuration(config_manager: ConfigManager) -> None:
     
     print("\nINFERENCE CONFIGURATION:")
     inference_config = config['inference']
-    print(f"  Prompt Template: {inference_config['prompt_template']}")
+    # Preprocessor settings
+    print(f"  Preprocessor: {inference_config.get('preprocessor')}")
+    print(f"  Prompt File: {inference_config.get('prompt_file')}")
     print(f"  Batch Size: {inference_config['batch_size']}")
-    print(f"  Max Tokens: {inference_config['generation']['max_tokens']}")
+    print(f"  Max New Tokens: {inference_config['generation']['max_new_tokens']}")
     
     print("\nOUTPUT CONFIGURATION:")
     output_config = config['output']
@@ -338,23 +360,9 @@ def main():
         orchestrator = LLMInferenceOrchestrator(config_manager)
         
         # Initialize components
-        orchestrator.initialize_components()
+        orchestrator.setup_components()
         
-        # Determine output filename
-        output_filename = getattr(args, 'output_file', None)
-        if not output_filename:
-            output_filename = input("Enter output filename (or press Enter for default): ").strip()
-        
-        # Run inference
-        results = orchestrator.run_inference(
-            output_filename=output_filename,
-            resume=not getattr(args, 'no_resume', False)
-        )
-        
-        # Show results summary
-        print(f"\nInference completed successfully!")
-        print(f"   Processed {len(results)} MRNs")
-        print(f"   Results saved to output directory")
+        orchestrator.run_inference()
         
     except KeyboardInterrupt:
         logger.info("Inference interrupted by user")

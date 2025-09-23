@@ -4,32 +4,29 @@
 # Data Configuration
 data:
   # Data source configuration
-  source_type: "pickle"  # Options: "pickle", "json", "csv", "database"
+  source_type: "single_report"  # Options: "pickle", "json", "csv", "single_report"
   data_folder: "/radraid2/dongwoolee/LLM_Inference/data"
   
   # Input files configuration
   input_files:
     - name: "radiology_reports"
-      path: "mrnacc_ultrasound_generate_radreport.pkl"
+      path: "thygraph_exp41_radreports.pkl"
       required: true
-    - name: "biopsy_reports"
-      path: "mrnacc_ultrasound_generate_bxreport.pkl"
-      required: true
-  
+
   # Data processing
   # ID selection options (choose one):
-  process_all: false              # Process all available IDs
-  custom_ids: ['mrn0-acc0']                 # List of specific IDs to process (overrides process_all)
+  process_all: False              # Process all available IDs
+  custom_ids: ['5090489-47314031']                 # List of specific IDs to process (overrides process_all)
   id_file: null                  # Path to file containing IDs to process (overrides above)
   
   # Resume functionality
-  resume_from_existing: true
-  check_processed: true
+  resume_from_existing: True
+  check_processed: True
 
 # Model Configuration
 model:
   cache_dir: "/radraid2/dongwoolee/.llms"
-  model_name: "unsloth/medgemma-27b-it"
+  model_name: "meta-llama/Llama-3.1-8B-Instruct"
   
   # Quantization settings
   quantization:
@@ -37,12 +34,16 @@ model:
     bits: 4  # Options: 4, 8, null (no quantization)
   
   # Device settings
-  cuda_devices: "0,2"
+  cuda_devices: "7"
+  # max_memory:
+  #   "0": "40GB"
+  #   "1": "40GB"
 
 # Inference Configuration
 inference:
-  # Prompt configuration
-  prompt_template: "prompt_chat_template_Qwen1"
+  # Input preparation
+  preprocessor: "RadReport"
+  prompt_file: "prompts/radreport.yaml"
   
   # Generation parameters
   generation:
@@ -50,7 +51,7 @@ inference:
     temperature: null
     top_p: null
     top_k: null
-    max_tokens: 32768 # adjust this value based on your desired output length and the model's context window
+    max_new_tokens: 4096 # adjust this value based on your desired output length and the model's context window
   
   # Batch processing
   # Most models do not support batch processing, so we set it to 1
@@ -58,13 +59,13 @@ inference:
   shuffle: false
 
   # Multimodal models require the prompts to be in the multimodal format
-  multimodal: true
+  multimodal: false
 
 # Output Configuration
 output:
   # Output directory and file naming
   results_dir: "llm_results"
-  default_filename: "inference_results.json"
+  default_filename: "inference_results_2.json"
   
   # Output format
   format: "json"  # Options: "json", "yaml", "csv"
@@ -79,8 +80,11 @@ output:
 
 # Logging Configuration
 logging:
-  level: "INFO"  # Options: "DEBUG", "INFO", "WARNING", "ERROR"
-  file: "inference.log"
+  level: "INFO"  # Console logging level
+  file:
+    enabled: true
+    path: "logs/inference.log"
+    level: "DEBUG" # Optional: file-specific log level
   console: true
   
   # Progress tracking

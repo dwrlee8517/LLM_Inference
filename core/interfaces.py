@@ -4,7 +4,7 @@ These interfaces allow for easy extension and customization of components.
 """
 
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional, Iterator, Tuple
+from typing import Any, Dict, List, Optional, Iterator, Tuple, Type
 from dataclasses import dataclass
 import sys
 import os
@@ -13,8 +13,21 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from core.config import GenerationConfig, DataConfig, ModelConfig, OutputConfig, InferenceConfig # Import the new dataclasses
 import logging
+from torch.utils.data import Dataset
 
 logger = logging.getLogger(__name__)
+
+class Preprocessor(ABC):
+    """Abstract base class for preparing raw model inputs from dataset batches."""
+
+    @abstractmethod
+    def __init__(self, config: InferenceConfig):
+        pass
+
+    @abstractmethod
+    def prepare_inputs(self, batch: Any) -> Tuple[List[str], List[Any]]:
+        """Return (mrn_list, raw_items) for the given batch."""
+        pass
 
 @dataclass
 class InferenceRequest:
@@ -33,27 +46,22 @@ class InferenceResult:
     execution_time: Optional[float] = None
 
 
-class DataLoader(ABC):
-    """Abstract base class for data loaders."""
+class DataReader(ABC):
+    """Abstract base class for data readers that produce a Dataset."""
     
     @abstractmethod
-    def load_data(self, config: DataConfig) -> Dict[str, Any]:
-        """Load data from the configured source."""
+    def __init__(self, config: DataConfig):
+        """Initialize the data reader with its configuration."""
         pass
     
     @abstractmethod
-    def get_mrn_list(self) -> List[str]:
-        """Get list of MRNs based on configuration."""
+    def load_data(self) -> Dataset:
+        """Load data from a source and return a Dataset object."""
         pass
     
     @abstractmethod
-    def create_dataset(self, data: Dict[str, Any], mrns: List[str]) -> Any:
-        """Create a dataset object from loaded data."""
-        pass
-    
-    @abstractmethod
-    def validate_data(self, data: Dict[str, Any]) -> bool:
-        """Validate the loaded data structure."""
+    def get_all_ids(self) -> List[str]:
+        """Return a list of all unique IDs available in the data source."""
         pass
 
 
@@ -117,12 +125,12 @@ class OutputManager(ABC):
     @abstractmethod
     def save_results(self, 
                      results: Dict[str, Any], 
-                     output_config: OutputConfig) -> str:
+                     filename: str = None) -> str:
         """Save results to the configured output format."""
         pass
     
     @abstractmethod
-    def load_existing_results(self, file_path: str) -> Dict[str, Any]:
+    def load_existing_results(self, filename: str = None) -> Dict[str, Any]:
         """Load existing results from a file."""
         pass
     
@@ -347,22 +355,17 @@ class InferenceOrchestrator(ABC):
 
 # Factory pattern for creating components
 class ComponentFactory:
-    """Factory for creating system components."""
-    
-    _data_loaders: Dict[str, type] = {}
-    _model_managers: Dict[str, type] = {}
-    _prompt_managers: Dict[str, type] = {}
-    _output_managers: Dict[str, type] = {}
-    _inference_engines: Dict[str, type] = {}
+    """A factory for creating various components like model managers and data readers."""
+    _model_managers = {}
+    _data_readers = {}
+    _prompt_managers = {}
+    _output_managers = {}
+    _inference_engines = {}
+    _preprocessors = {}
     
     # Model registry mapping model names to model managers
     _model_registry: Dict[str, str] = {}  # model_name -> manager_name
     _model_patterns: Dict[str, List[str]] = {}  # manager_name -> list of model name patterns
-    
-    @classmethod
-    def register_data_loader(cls, name: str, loader_class: type) -> None:
-        """Register a data loader class."""
-        cls._data_loaders[name] = loader_class
     
     @classmethod
     def register_model_manager(cls, name: str, manager_class: type) -> None:
@@ -445,11 +448,19 @@ class ComponentFactory:
         cls._inference_engines[name] = engine_class
     
     @classmethod
-    def create_data_loader(cls, name: str, config: DataConfig) -> DataLoader:
-        """Create a data loader instance."""
-        if name not in cls._data_loaders:
-            raise ValueError(f"Unknown data loader: {name}")
-        return cls._data_loaders[name](config)
+    def register_data_reader(cls, name: str, reader_class: Type['DataReader']):
+        """Register a data reader class."""
+        cls._data_readers[name] = reader_class
+        logger.info(f"Registered data reader: {name}")
+
+    @classmethod
+    def create_data_reader(cls, config: DataConfig) -> 'DataReader':
+        """Create a data reader instance based on the configuration."""
+        reader_type = config.source_type
+        if reader_type in cls._data_readers:
+            return cls._data_readers[reader_type](config)
+        else:
+            raise ValueError(f"Unsupported data reader type: {reader_type}")
     
     @classmethod
     def create_model_manager(cls, name: str, config: ModelConfig) -> ModelManager:
@@ -477,8 +488,9 @@ class ComponentFactory:
         return cls._model_managers[manager_name](config)
     
     @classmethod
-    def create_prompt_manager(cls, name: str, config: InferenceConfig) -> PromptManager:
+    def create_prompt_manager(cls, config: InferenceConfig) -> PromptManager:
         """Create a prompt manager instance."""
+        name = config.prompt_manager
         if name not in cls._prompt_managers:
             raise ValueError(f"Unknown prompt manager: {name}")
         return cls._prompt_managers[name](config)
@@ -491,8 +503,23 @@ class ComponentFactory:
         return cls._output_managers[name](config)
     
     @classmethod
-    def create_inference_engine(cls, name: str, config: InferenceConfig, model_manager: ModelManager, prompt_manager: PromptManager) -> InferenceEngine:
+    def create_inference_engine(cls, name: str, config: InferenceConfig, model_manager: ModelManager, preprocessor: 'Preprocessor') -> InferenceEngine:
         """Create an inference engine instance."""
         if name not in cls._inference_engines:
             raise ValueError(f"Unknown inference engine: {name}")
-        return cls._inference_engines[name](config, model_manager, prompt_manager)
+        return cls._inference_engines[name](config, model_manager, preprocessor)
+
+    @classmethod
+    def register_preprocessor(cls, name: str, preprocessor_class: Type['Preprocessor']) -> None:
+        """Register a preprocessor class."""
+        cls._preprocessors[name] = preprocessor_class
+        logger.info(f"Registered preprocessor: {name}")
+
+    @classmethod
+    def create_preprocessor(cls, config: InferenceConfig) -> 'Preprocessor':
+        name = getattr(config, 'preprocessor', None)
+        if not name:
+            raise ValueError("InferenceConfig.preprocessor is not set")
+        if name not in cls._preprocessors:
+            raise ValueError(f"Unknown preprocessor: {name}")
+        return cls._preprocessors[name](config)

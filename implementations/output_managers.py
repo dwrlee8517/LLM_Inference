@@ -10,7 +10,7 @@ import logging
 from ruamel.yaml import YAML
 
 from core.interfaces import OutputManager, ComponentFactory
-from core.config import OutputConfig
+from core.config import OutputConfig, PROJECT_ROOT
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +23,7 @@ class JSONOutputManager(OutputManager):
 
     def get_output_path(self, filename: str = None) -> Path:
         """Construct the full output path for a file."""
-        results_dir = Path(self.config.results_dir)
+        results_dir = PROJECT_ROOT / self.config.results_dir
         results_dir.mkdir(parents=True, exist_ok=True)
         
         base_filename = filename or self.config.default_filename

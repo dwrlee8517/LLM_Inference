@@ -7,7 +7,7 @@ import os
 import yaml
 import argparse
 from typing import Dict, Any, Optional, List
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 import logging
 import sys
@@ -50,16 +50,15 @@ class GenerationConfig:
     temperature: Optional[float]
     top_p: Optional[float]
     top_k: Optional[int]
-    max_tokens: int
+    max_new_tokens: int
 
 
 @dataclass
 class InferenceConfig:
     """Configuration for inference parameters."""
-    prompt_template: str
+    preprocessor: str
+    prompt_file: Optional[str]
     generation: GenerationConfig
-    batch_size: int
-    shuffle: bool
     multimodal: bool
 
 @dataclass
@@ -73,16 +72,14 @@ class OutputConfig:
     backup_existing: bool
     add_timestamp: bool
 
-
 @dataclass
 class LoggingConfig:
-    """Configuration for logging settings."""
+    """Configuration for logging."""
     level: str
-    file: str
     console: bool
     progress_bar: bool
     gpu_monitoring: bool
-
+    file: Dict[str, Any] = field(default_factory=lambda: {"enabled": False, "path": None, "level": "INFO"})
 
 @dataclass
 class SystemConfig:
@@ -98,7 +95,7 @@ class SystemConfig:
 class ConfigManager:
     """Manages configuration loading and validation."""
     
-    def __init__(self, config_path: Optional[str] = None):
+    def __init__(self, config_path: Optional[str] = "configs/BaseConfig.yaml"):
 
         if not config_path.startswith("configs/"):
             # If the configuration yaml file is not in the configs/ directory, ask the user if they want to use the default configuration file directory
@@ -176,16 +173,15 @@ class ConfigManager:
         inference_conf = self.config['inference']
         generation_conf = inference_conf.get('generation', {})
         return InferenceConfig(
-            prompt_template=inference_conf['prompt_template'],
+            preprocessor=inference_conf.get('preprocessor', 'RadPath'),
+            prompt_file=inference_conf.get('prompt_file'),
             generation=GenerationConfig(
                 do_sample=generation_conf.get('do_sample', False),
                 temperature=generation_conf.get('temperature', None),
                 top_p=generation_conf.get('top_p', None),
                 top_k=generation_conf.get('top_k', None),
-                max_tokens=generation_conf['max_tokens']
+                max_new_tokens=generation_conf['max_new_tokens']
             ),
-            batch_size=inference_conf['batch_size'],
-            shuffle=inference_conf['shuffle'],
             multimodal=inference_conf['multimodal']
         )
     
@@ -224,9 +220,10 @@ class ConfigManager:
             'cache_dir': ['model', 'cache_dir'],
             'cuda_devices': ['model', 'cuda_devices'],
             'quantization': ['model', 'quantization', 'bits'], # Map to bits
-            'batch_size': ['inference', 'batch_size'],
-            'prompt_template': ['inference', 'prompt_template'],
-            'max_tokens': ['inference', 'generation', 'max_tokens'],
+            'preprocessor': ['inference', 'preprocessor'],
+            'prompt_file': ['inference', 'prompt_file'],
+            # CLI parser exposes --max-tokens; map it to max_new_tokens in config
+            'max_tokens': ['inference', 'generation', 'max_new_tokens'],
             'output_file': ['output', 'default_filename'],
             'results_dir': ['output', 'results_dir'],
             'log_level': ['logging', 'level'],
@@ -347,12 +344,6 @@ def create_argument_parser() -> argparse.ArgumentParser:
     
     # Inference arguments
     parser.add_argument(
-        '--batch-size',
-        type=int,
-        help='Batch size for inference'
-    )
-    
-    parser.add_argument(
         '--prompt-template',
         type=str,
         help='Prompt template to use'
@@ -413,30 +404,60 @@ def create_argument_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def setup_logging(config: LoggingConfig) -> None:
-    """Setup logging configuration."""
-    level = getattr(logging, config.level.upper())
-    
-    # Create formatter
-    formatter = logging.Formatter(
-        '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-    )
-    
-    # Setup root logger
+def setup_logging(config: LoggingConfig):
+    """Set up logging for the application."""
     root_logger = logging.getLogger()
-    root_logger.setLevel(level)
-    
-    # Clear existing handlers
-    root_logger.handlers.clear()
-    
-    # Console handler
+    # Clear existing handlers to prevent duplicate logs in case of re-initialization
+    if root_logger.hasHandlers():
+        root_logger.handlers.clear()
+
+    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+
+    # Determine console log level
+    console_level = getattr(logging, config.level.upper(), logging.INFO)
+
+    # Determine file log level if enabled
+    file_level = None
+    if config.file.get("enabled") and config.file.get("path"):
+        file_level_str = config.file.get("level", config.level).upper()
+        file_level = getattr(logging, file_level_str, logging.INFO)
+
+    # Set root logger level to the most verbose (lowest) of all handler levels
+    # to ensure messages are not filtered out before reaching the handlers.
+    if file_level is not None:
+        root_logger.setLevel(min(console_level, file_level))
+    else:
+        root_logger.setLevel(console_level)
+
+    # Configure Console Handler
     if config.console:
-        console_handler = logging.StreamHandler()
+        console_handler = logging.StreamHandler(sys.stdout)
+        console_handler.setLevel(console_level)
         console_handler.setFormatter(formatter)
         root_logger.addHandler(console_handler)
-    
-    # File handler
-    if config.file:
-        file_handler = logging.FileHandler(config.file)
+
+    # Configure File Handler
+    if file_level is not None:
+        log_path = Path(config.file["path"])
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        file_handler = logging.FileHandler(log_path, mode='a')
+        file_handler.setLevel(file_level)
         file_handler.setFormatter(formatter)
-        root_logger.addHandler(file_handler) 
+        root_logger.addHandler(file_handler)
+        
+        # This initial log message will now go to both handlers
+        logging.info(f"File logging enabled. Logging to: {log_path} at level {logging.getLevelName(file_level)}")
+
+def find_project_root(marker=".git") -> Path:
+    """Find the project root by searching upwards for a marker file/directory."""
+    current_dir = Path(__file__).resolve().parent
+    while current_dir != current_dir.parent:  # Stop at the filesystem root
+        if (current_dir / marker).exists():
+            return current_dir
+        current_dir = current_dir.parent
+    raise FileNotFoundError(f"Project root marker '{marker}' not found. Could not determine project root.")
+
+# You can then use this function where needed
+PROJECT_ROOT = find_project_root()
+print(f"Project root found at: {PROJECT_ROOT}")

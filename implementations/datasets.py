@@ -19,6 +19,11 @@ class PairedReportDataset(Dataset):
         mrn = self.mrns[index]
         return mrn, self.radreports[mrn], self.bxreports[mrn]
 
+    def filter_ids(self, ids: list):
+        """Return a new PairedReportDataset containing only the provided ids."""
+        filtered_ids = [mrn for mrn in ids if mrn in self.radreports and mrn in self.bxreports]
+        return PairedReportDataset(self.radreports, self.bxreports, filtered_ids)
+
 class SingleReportDataset(Dataset):
     """Dataset for single report data (e.g., radiology only)."""
     
@@ -32,3 +37,8 @@ class SingleReportDataset(Dataset):
     def __getitem__(self, index):
         mrn = self.mrns[index]
         return mrn, self.reports[mrn]
+
+    def filter_ids(self, ids: list):
+        """Return a new SingleReportDataset containing only the provided ids."""
+        filtered_ids = [mrn for mrn in ids if mrn in self.reports]
+        return SingleReportDataset(self.reports, filtered_ids)

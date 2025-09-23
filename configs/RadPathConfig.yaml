@@ -4,7 +4,7 @@
 # Data Configuration
 data:
   # Data source configuration
-  source_type: "pickle"  # Options: "pickle", "json", "csv", "database"
+  source_type: "paired_report"  # Options: "paired_report", "single_report"
   data_folder: "/radraid2/dongwoolee/LLM_Inference/data"
   
   # Input files configuration
@@ -29,7 +29,7 @@ data:
 # Model Configuration
 model:
   cache_dir: "/radraid2/dongwoolee/.llms"
-  model_name: "unsloth/QwQ-32B-unsloth-bnb-4bit"
+  model_name: "meta-llama/Llama-3.1-8B-Instruct"
   
   # Quantization settings
   quantization:
@@ -37,19 +37,16 @@ model:
     bits: 4  # Options: 4, 8, null (no quantization)
   
   # Device settings
-  cuda_devices: "0,1"
-
-  # Adjust the max memory for each GPU if you don't have enough memory for inference
-  # For example, if you have 48GB of memory, and your model is 46GB, you might not have enough memory for inference. 
-  # Then you need to reduce the max memory for each GPU so that the model can be loaded to two GPUs
-  max_memory:
-    "0": "32GB"
-    "1": "32GB"
+  cuda_devices: "7"
+  # max_memory:
+  #   "0": "40GB"
+  #   "1": "40GB"
 
 # Inference Configuration
 inference:
-  # Prompt configuration
-  prompt_template: "prompt_chat_template_Qwen1"
+  # Input preparation
+  preprocessor: "RadReport"
+  prompt_file: "prompts/radreport.yaml"
   
   # Generation parameters
   generation:
@@ -57,7 +54,7 @@ inference:
     temperature: null
     top_p: null
     top_k: null
-    max_tokens: 32768 # adjust this value based on your desired output length and the model's context window
+    max_new_tokens: 4096 # adjust this value based on your desired output length and the model's context window
   
   # Batch processing
   # Most models do not support batch processing, so we set it to 1
@@ -86,8 +83,11 @@ output:
 
 # Logging Configuration
 logging:
-  level: "INFO"  # Options: "DEBUG", "INFO", "WARNING", "ERROR"
-  file: "inference.log"
+  level: "INFO"  # Console logging level
+  file:
+    enabled: true
+    path: "logs/inference.log"
+    level: "DEBUG" # Optional: file-specific log level
   console: true
   
   # Progress tracking
