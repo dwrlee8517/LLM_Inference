@@ -29,17 +29,10 @@ class DataConfig:
     check_processed: bool
 
 @dataclass
-class QuantizationConfig:
-    """Configuration for model quantization."""
-    enabled: bool
-    bits: Optional[int]
-
-@dataclass
 class ModelConfig:
     """Configuration for model settings."""
     cache_dir: str
     model_name: str
-    quantization: QuantizationConfig
     cuda_devices: str
     max_memory: Optional[Dict[str, str]]
 
@@ -156,14 +149,9 @@ class ConfigManager:
     def get_model_config(self) -> ModelConfig:
         """Get model configuration as a dataclass."""
         model_conf = self.config['model']
-        quantization_conf = model_conf.get('quantization', {})
         return ModelConfig(
             cache_dir=model_conf['cache_dir'],
             model_name=model_conf['model_name'],
-            quantization=QuantizationConfig(
-                enabled=quantization_conf.get('enabled', False),
-                bits=quantization_conf.get('bits', None)
-            ),
             cuda_devices=model_conf['cuda_devices'],
             max_memory=model_conf.get('max_memory')
         )
@@ -219,7 +207,6 @@ class ConfigManager:
             'model_name': ['model', 'model_name'],
             'cache_dir': ['model', 'cache_dir'],
             'cuda_devices': ['model', 'cuda_devices'],
-            'quantization': ['model', 'quantization', 'bits'], # Map to bits
             'preprocessor': ['inference', 'preprocessor'],
             'prompt_file': ['inference', 'prompt_file'],
             # CLI parser exposes --max-tokens; map it to max_new_tokens in config
@@ -235,25 +222,13 @@ class ConfigManager:
         
         for arg_name, config_path in arg_mappings.items():
             if hasattr(args, arg_name) and getattr(args, arg_name) is not None:
-                # Special handling for quantization enabling
-                if arg_name == 'quantization':
-                    current = overrides
-                    for key in config_path[:-2]: # Navigate to 'model' key
-                        if key not in current:
-                            current[key] = {}
-                        current = current[key]
-                    if 'quantization' not in current:
-                        current['quantization'] = {}
-                    current['quantization']['enabled'] = True # Enable quantization if bits are provided
-                    current['quantization']['bits'] = getattr(args, arg_name)
-                else:
-                    # Navigate to the correct nested dictionary
-                    current = overrides
-                    for key in config_path[:-1]:
-                        if key not in current:
-                            current[key] = {}
-                        current = current[key]
-                    current[config_path[-1]] = getattr(args, arg_name)
+                # Navigate to the correct nested dictionary
+                current = overrides
+                for key in config_path[:-1]:
+                    if key not in current:
+                        current[key] = {}
+                    current = current[key]
+                current[config_path[-1]] = getattr(args, arg_name)
 
         # Handle --no-resume separately
         if hasattr(args, 'no_resume') and getattr(args, 'no_resume'):
@@ -335,12 +310,7 @@ def create_argument_parser() -> argparse.ArgumentParser:
         help='CUDA devices to use (e.g., "0,1")'
     )
     
-    parser.add_argument(
-        '--quantization',
-        type=int,
-        choices=[4, 8],
-        help='Quantization bits (4 or 8)'
-    )
+    # (quantization removed)
     
     # Inference arguments
     parser.add_argument(

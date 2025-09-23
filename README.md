@@ -19,7 +19,7 @@ Configurable pipeline to run Hugging Face LLMs over your datasets (single radiol
 - [Prompts & Preprocessors](#prompts--preprocessors)
   - [Prompt YAML schema](#prompt-yaml-schema)
   - [Create a custom Preprocessor](#create-a-custom-preprocessor)
-- [Models, Quantization, and Support Matrix](#models-quantization-and-support-matrix)
+- [Models, and Support Matrix](#models-and-support-matrix)
 - [Logging](#logging)
 - [Troubleshooting](#troubleshooting)
 
@@ -77,9 +77,6 @@ data:
 model:
   cache_dir: "/radraid2/dongwoolee/.llms"
   model_name: "meta-llama/Llama-3.1-8B-Instruct"
-  quantization:
-    enabled: false
-    bits: 4
   cuda_devices: "0"
   # max_memory: {"0": "40GB"}
 
@@ -145,7 +142,6 @@ data:
 model:
   cache_dir: "/radraid2/dongwoolee/.llms"
   model_name: "meta-llama/Llama-3.1-8B-Instruct"
-  quantization: { enabled: false, bits: 4 }
   cuda_devices: "0,1"
 
 inference:
@@ -204,7 +200,6 @@ python -m core.run_inference --config configs/RadReportConfig.yaml \
   --model-name meta-llama/Llama-3.1-8B-Instruct \
   --cache-dir /radraid2/dongwoolee/.llms \
   --cuda-devices 0 \
-  --quantization 4 \
   --max-tokens 1024 \
   --data-folder /path/to/data \
   --custom-ids id1 id2 id3 \
@@ -293,10 +288,9 @@ ComponentFactory.register_preprocessor("MyPrep", MyPreprocessor)
 ```
 Then set in config: `inference.preprocessor: "MyPrep"` and point `inference.prompt_file` to your YAML.
 
-## Models, Quantization, and Support Matrix
+## Models and Support Matrix
 - Set your model via `model.model_name` (e.g., `meta-llama/Llama-3.1-8B-Instruct`).
 - Use `--list-models` to see supported model families/patterns mapped to internal managers.
-- Quantization: set `model.quantization.enabled: true` and choose `bits: 4` or `8`, or pass `--quantization 4`.
 - Device placement is automatic (`device_map: auto`). Inputs are placed to the model’s device to avoid mismatches.
 
 ## Logging
@@ -304,7 +298,7 @@ Configured by `logging` in your config. By default, `urllib3` and `accelerate` l
 
 ## Troubleshooting
 - No/gated model access: ensure `HF_TOKEN` is set (`echo $HF_TOKEN`).
-- CUDA/device errors: check `model.cuda_devices` and available memory; reduce `max_new_tokens` or enable quantization.
+- CUDA/device errors: check `model.cuda_devices` and available memory; reduce `max_new_tokens`.
 - Resume didn’t skip: ensure `output.format: jsonl` and `data.resume_from_existing: true`; also ensure the same `default_filename`.
 - Processed too many/too few: verify `data.process_all`, `data.custom_ids`, or `data.id_file`.
 - CSV parsing: set `mrn_column` and `text_column` per file in `data.input_files`.
@@ -379,9 +373,6 @@ data:
 model:
   cache_dir: "./models" # Path relative to project root
   model_name: "unsloth/Llama-3.3-70B-Instruct-bnb-4bit"
-  quantization:
-    enabled: false
-    bits: null
   cuda_devices: "0,1"
   max_memory: # Optional: omit this section or set to null if not needed
     "0": "32GB"
@@ -460,7 +451,6 @@ usage: run_inference.py [-h] [-c CONFIG] [--data-folder DATA_FOLDER]
                         [--process-all] [--custom-ids CUSTOM_IDS [CUSTOM_IDS ...]]
                         [--id-file ID_FILE] [--model-name MODEL_NAME]
                         [--cache-dir CACHE_DIR] [--cuda-devices CUDA_DEVICES]
-                        [--quantization {4,8}] [--batch-size BATCH_SIZE]
                         [--prompt-template PROMPT_TEMPLATE]
                         [--max-tokens MAX_TOKENS] [--output-file OUTPUT_FILE]
                         [--results-dir RESULTS_DIR] [--format {json,yaml,csv}]
@@ -490,8 +480,6 @@ Model arguments:
                         Model cache directory (default: None)
   --cuda-devices CUDA_DEVICES
                         CUDA devices to use (e.g., "0,1") (default: None)
-  --quantization {4,8}
-                        Quantization bits (4 or 8) (default: None)
 
 Inference arguments:
   --batch-size BATCH_SIZE

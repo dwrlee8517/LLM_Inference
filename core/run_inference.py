@@ -268,7 +268,7 @@ def show_configuration(config_manager: ConfigManager) -> None:
     print(f"  Model Name: {model_name}")
     print(f"  Cache Dir: {model_config['cache_dir']}")
     print(f"  CUDA Devices: {model_config['cuda_devices']}")
-    print(f"  Quantization: {model_config['quantization']['bits']} bits")
+    # Quantization removed
     
     # Show which model manager will be used
     try:

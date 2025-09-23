@@ -31,11 +31,6 @@ model:
   cache_dir: "/radraid2/dongwoolee/.llms"
   model_name: "meta-llama/Llama-3.1-8B-Instruct"
   
-  # Quantization settings
-  quantization:
-    enabled: false
-    bits: 4  # Options: 4, 8, null (no quantization)
-  
   # Device settings
   cuda_devices: "3,4"
   # max_memory:

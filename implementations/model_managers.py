@@ -3,7 +3,7 @@ Concrete implementation of the ModelManager for Hugging Face Transformers.
 """
 import os
 import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig, AutoModelForImageTextToText, AutoProcessor
+from transformers import AutoModelForCausalLM, AutoTokenizer, AutoModelForImageTextToText, AutoProcessor
 from typing import Tuple, Any, List, Dict, Type
 import logging
 import sys
@@ -35,10 +35,8 @@ class BaseHuggingFaceManager(ModelManager):
         logger.debug(f"Model config: {self.config}")
         os.environ["CUDA_VISIBLE_DEVICES"] = self.config.cuda_devices
         
-        bnb_config = self._create_bnb_config()
-
         try:
-            self.model, self.tokenizer = self._load_specific_model_and_tokenizer(bnb_config)
+            self.model, self.tokenizer = self._load_specific_model_and_tokenizer()
             logger.info("Model and tokenizer loaded successfully.")
         except Exception as e:
             logger.error(f"Error loading model or tokenizer: {e}", exc_info=True)
@@ -46,43 +44,11 @@ class BaseHuggingFaceManager(ModelManager):
 
         return self.model, self.tokenizer
         
-    def _create_bnb_config(self) -> BitsAndBytesConfig:
-        """Create BitsAndBytesConfig if quantization is enabled."""
-        if self.config.quantization.enabled:
-            if self.config.quantization.bits == 8:
-                logger.info("Quantization enabled: 8-bit")
-                return BitsAndBytesConfig(load_in_8bit=True)
-            elif self.config.quantization.bits == 4:
-                logger.info("Quantization enabled: 4-bit")
-                return BitsAndBytesConfig(load_in_4bit=True)
-            else:
-                raise ValueError("Invalid quantization bits specified in config.")
-        return None
+    # Quantization removed
 
-    def _inject_quantization_kwargs(self, model_kwargs: Dict[str, Any], bnb_config: BitsAndBytesConfig) -> None:
-        """Inject quantization-related kwargs into model loading args with version compatibility.
+    # Quantization removed
 
-        For newer transformers versions that support HF quantization configs, we pass
-        `quantization_config=bnb_config`. For older versions, we instead pass the
-        legacy flags `load_in_8bit` or `load_in_4bit` extracted from the bnb config.
-        """
-        if bnb_config is None:
-            return
-
-        # Prefer new API when available (BitsAndBytesConfig may expose get_loading_attributes)
-        if hasattr(bnb_config, "get_loading_attributes"):
-            model_kwargs["quantization_config"] = bnb_config
-            return
-
-        # Fallback: legacy flags for older transformers
-        load_in_8 = getattr(bnb_config, "load_in_8bit", False)
-        load_in_4 = getattr(bnb_config, "load_in_4bit", False)
-        if load_in_8:
-            model_kwargs["load_in_8bit"] = True
-        if load_in_4:
-            model_kwargs["load_in_4bit"] = True
-
-    def _load_specific_model_and_tokenizer(self, bnb_config: BitsAndBytesConfig) -> Tuple[Any, Any]:
+    def _load_specific_model_and_tokenizer(self) -> Tuple[Any, Any]:
         """Default loading logic using Hugging Face. Subclasses should replace this method."""
         tokenizer = AutoTokenizer.from_pretrained(
             self.config.model_name, cache_dir=self.config.cache_dir
@@ -105,7 +71,7 @@ class BaseHuggingFaceManager(ModelManager):
                     max_memory[key] = value
             model_kwargs["max_memory"] = max_memory
 
-        self._inject_quantization_kwargs(model_kwargs, bnb_config)
+        # (quantization removed)
 
         model = AutoModelForCausalLM.from_pretrained(**model_kwargs)
         return model, tokenizer
@@ -196,7 +162,6 @@ class BaseHuggingFaceManager(ModelManager):
         return {
             "model_family": self.__class__.__name__,
             "model_name": self.config.model_name,
-            "quantization": self.config.quantization.__dict__,
             "is_loaded": self.model is not None,
         }
 
@@ -266,7 +231,7 @@ class MedGemmaModelManager(BaseHuggingFaceManager):
         logger.info(f"Initialized {self.__class__.__name__}")
 
 
-    def _load_specific_model_and_tokenizer(self, bnb_config: BitsAndBytesConfig) -> Tuple[Any, Any]:
+    def _load_specific_model_and_tokenizer(self) -> Tuple[Any, Any]:
         """Load model and tokenizer using huggingface."""
 
         model_kwargs = {
@@ -286,7 +251,7 @@ class MedGemmaModelManager(BaseHuggingFaceManager):
                     max_memory[key] = value
             model_kwargs["max_memory"] = max_memory
 
-        self._inject_quantization_kwargs(model_kwargs, bnb_config)
+        # (quantization removed)
 
         model = AutoModelForImageTextToText.from_pretrained(**model_kwargs)
 
